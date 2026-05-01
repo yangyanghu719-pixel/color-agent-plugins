@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.schemas.request_models import AnalyzeRequest, RecolorRequest, SegmentRequest
 from app.schemas.response_models import AnalyzeResponse, HealthResponse, RecolorResponse, SegmentResponse
@@ -27,3 +28,6 @@ def recolor(payload: RecolorRequest) -> dict:
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(payload: AnalyzeRequest) -> dict:
     return AnalyzeService.analyze(payload)
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
