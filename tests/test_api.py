@@ -17,6 +17,21 @@ def _create_test_image(path: Path) -> None:
     img.save(path)
 
 
+def _region(region_id: str, h: int, s: int, l: int, percentage: float, role: str, hex_value: str) -> dict:
+    return {
+        "id": region_id,
+        "name": region_id,
+        "hex": hex_value,
+        "rgb": {"r": 120, "g": 120, "b": 120},
+        "hsl": {"h": h, "s": s, "l": l},
+        "percentage": percentage,
+        "role": role,
+        "mask_url": "https://example.com/masks/mask.png",
+        "soft_mask_url": "https://example.com/masks/mask-soft.png",
+        "description": "desc",
+    }
+
+
 def test_health():
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -79,27 +94,56 @@ def test_recolor_mask_based_preview(tmp_path):
     assert preview_path.exists()
 
 
-def test_analyze_returns_explanation():
-    region = {
-        "id": "region-1",
-        "name": "主体暖红",
-        "hex": "#D9534F",
-        "rgb": {"r": 217, "g": 83, "b": 79},
-        "hsl": {"h": 2, "s": 64, "l": 58},
-        "percentage": 34.0,
-        "role": "主体",
-        "mask_url": "https://example.com/masks/region-1.png",
-        "soft_mask_url": "https://example.com/masks/region-1-soft.png",
-        "description": "desc",
-    }
-    adjusted = {**region, "hsl": {"h": 2, "s": 70, "l": 50}}
+def test_analyze_full_fields_and_ai_explanation():
+    original = [
+        _region("region-main", 10, 52, 48, 45.0, "主体", "#C35A50"),
+        _region("region-sub", 190, 34, 62, 35.0, "辅助", "#66A9BC"),
+        _region("region-bg", 40, 22, 78, 20.0, "背景", "#D6CCB2"),
+    ]
+    adjusted = [
+        _region("region-main", 8, 72, 56, 45.0, "主体", "#D95A4E"),
+        _region("region-sub", 188, 46, 50, 35.0, "辅助", "#4E90B5"),
+        _region("region-bg", 38, 18, 76, 20.0, "背景", "#D0C8B2"),
+    ]
+
     payload = {
-        "original_color_regions": [region],
-        "adjusted_color_regions": [adjusted],
+        "original_color_regions": original,
+        "adjusted_color_regions": adjusted,
         "before_image_url": "https://example.com/before.png",
         "after_image_url": "https://example.com/after.png",
-        "user_goal": "更有冲击力",
+        "user_goal": "让主体更突出",
     }
     resp = client.post("/analyze", json=payload)
     assert resp.status_code == 200
-    assert resp.json()["ai_explanation"]
+    body = resp.json()
+
+    required_fields = {
+        "status", "message", "tags", "color_relation", "visual_feeling", "suitable_scenario",
+        "summary", "ai_explanation", "risk", "next_step"
+    }
+    assert required_fields.issubset(set(body.keys()))
+    assert body["ai_explanation"]
+    assert any(tag in body["tags"] for tag in ["饱和度提升", "对比增强", "主体更突出"])
+
+
+def test_analyze_complementary_relation_and_contrast():
+    original = [
+        _region("main", 10, 40, 45, 50.0, "主色", "#AA5544"),
+        _region("sub", 170, 35, 45, 40.0, "辅助", "#55AA99"),
+    ]
+    adjusted = [
+        _region("main", 5, 68, 62, 50.0, "主色", "#D95D55"),
+        _region("sub", 185, 40, 38, 40.0, "辅助", "#4F9CA9"),
+    ]
+    payload = {
+        "original_color_regions": original,
+        "adjusted_color_regions": adjusted,
+        "before_image_url": "https://example.com/before.png",
+        "after_image_url": "https://example.com/after.png",
+    }
+    resp = client.post("/analyze", json=payload)
+    body = resp.json()
+
+    assert resp.status_code == 200
+    assert "近互补/互补色" in body["color_relation"]
+    assert any(tag in body["tags"] for tag in ["对比增强", "主体更突出"])
