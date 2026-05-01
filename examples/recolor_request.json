@@ -1,0 +1,15 @@
+{
+  "image_id": "sample_image_id",
+  "original_image_url": "https://example.com/sample-image.jpg",
+  "target_region_id": "region_1",
+  "original_hsl": {
+    "h": 210,
+    "s": 45,
+    "l": 52
+  },
+  "new_hsl": {
+    "h": 28,
+    "s": 70,
+    "l": 58
+  }
+}
