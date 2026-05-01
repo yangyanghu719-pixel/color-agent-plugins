@@ -1,8 +1,20 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
 
 from app.main import app
 
 client = TestClient(app)
+
+
+def _create_test_image(path: Path) -> None:
+    img = Image.new("RGB", (320, 240), "blue")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, 160, 240), fill=(220, 40, 40))
+    draw.rectangle((0, 160, 320, 240), fill=(40, 190, 70))
+    draw.rectangle((250, 20, 305, 75), fill=(245, 220, 30))
+    img.save(path)
 
 
 def test_health():
@@ -12,15 +24,23 @@ def test_health():
     assert body["status"] == "ok"
 
 
-def test_segment_structure():
-    resp = client.post("/segment", json={"image_url": "https://example.com/demo.jpg", "color_count": 4})
+def test_segment_structure(tmp_path):
+    image_path = tmp_path / "segment-test.png"
+    _create_test_image(image_path)
+
+    resp = client.post("/segment", json={"image_url": str(image_path), "color_count": 4})
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "success"
-    assert len(body["color_regions"]) == 4
-    assert set(body["color_regions"][0].keys()) >= {
-        "id", "name", "hex", "rgb", "hsl", "percentage", "role", "mask_url", "soft_mask_url", "description"
-    }
+    assert 2 <= len(body["color_regions"]) <= 4
+    assert body["annotated_image_url"]
+
+    for region in body["color_regions"]:
+        assert set(region.keys()) >= {
+            "id", "name", "hex", "rgb", "hsl", "percentage", "role", "mask_url", "soft_mask_url", "description"
+        }
+        assert region["mask_url"]
+        assert region["soft_mask_url"]
 
 
 def test_recolor_hsl_change():

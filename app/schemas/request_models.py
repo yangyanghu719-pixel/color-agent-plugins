@@ -31,7 +31,7 @@ class ColorRegionModel(BaseModel):
 
 
 class SegmentRequest(BaseModel):
-    image_url: Optional[HttpUrl] = None
+    image_url: Optional[str] = None
     color_count: int = Field(4, ge=1, le=12)
 
 

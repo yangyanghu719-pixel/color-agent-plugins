@@ -1,68 +1,146 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from uuid import uuid4
+
+import numpy as np
+from PIL import Image
+
 from app.schemas.request_models import SegmentRequest
+from app.utils.color_convert import rgb_to_hex, rgb_to_hsl
+from app.utils.image_io import load_image, resize_for_processing, save_image
+from app.utils.mask_utils import create_annotated_overlay, feather_mask, mask_to_image
+
+
+@dataclass
+class ClusterResult:
+    center: np.ndarray
+    percentage: float
+    mask: np.ndarray
 
 
 class SegmentService:
     @staticmethod
-    def segment_colors(payload: SegmentRequest) -> dict:
-        image_url = str(payload.image_url) if payload.image_url else "https://example.com/images/default.jpg"
-        base_regions = [
-            {
-                "id": "region-1",
-                "name": "主体暖红",
-                "hex": "#D9534F",
-                "rgb": {"r": 217, "g": 83, "b": 79},
-                "hsl": {"h": 2, "s": 64, "l": 58},
-                "percentage": 34.0,
-                "role": "主体",
-                "mask_url": "https://example.com/masks/region-1.png",
-                "soft_mask_url": "https://example.com/masks/region-1-soft.png",
-                "description": "画面中最吸引注意力的暖色区域",
-            },
-            {
-                "id": "region-2",
-                "name": "背景中灰",
-                "hex": "#7F8C8D",
-                "rgb": {"r": 127, "g": 140, "b": 141},
-                "hsl": {"h": 184, "s": 6, "l": 52},
-                "percentage": 27.0,
-                "role": "背景",
-                "mask_url": "https://example.com/masks/region-2.png",
-                "soft_mask_url": "https://example.com/masks/region-2-soft.png",
-                "description": "提供稳定基底的低饱和背景色",
-            },
-            {
-                "id": "region-3",
-                "name": "辅助蓝",
-                "hex": "#5DADE2",
-                "rgb": {"r": 93, "g": 173, "b": 226},
-                "hsl": {"h": 204, "s": 69, "l": 63},
-                "percentage": 22.0,
-                "role": "辅助",
-                "mask_url": "https://example.com/masks/region-3.png",
-                "soft_mask_url": "https://example.com/masks/region-3-soft.png",
-                "description": "与暖红形成冷暖对比，增强层次",
-            },
-            {
-                "id": "region-4",
-                "name": "高光浅黄",
-                "hex": "#F9E79F",
-                "rgb": {"r": 249, "g": 231, "b": 159},
-                "hsl": {"h": 48, "s": 88, "l": 80},
-                "percentage": 17.0,
-                "role": "点缀",
-                "mask_url": "https://example.com/masks/region-4.png",
-                "soft_mask_url": "https://example.com/masks/region-4-soft.png",
-                "description": "小面积高亮点缀，提升活力",
-            },
-        ]
-
+    def _mock(payload: SegmentRequest) -> dict:
+        image_url = payload.image_url or "https://example.com/images/default.jpg"
         return {
             "status": "success",
             "message": "MVP mock segmentation completed",
             "image_id": "img-mock-001",
             "original_image_url": image_url,
             "annotated_image_url": "https://example.com/annotated/img-mock-001.png",
-            "color_regions": base_regions[: payload.color_count],
+            "color_regions": [],
+        }
+
+    @staticmethod
+    def _kmeans(pixels: np.ndarray, k: int, iterations: int = 20) -> tuple[np.ndarray, np.ndarray]:
+        n = len(pixels)
+        k = min(k, n)
+        rng = np.random.default_rng(42)
+        centers = pixels[rng.choice(n, size=k, replace=False)].astype(np.float32)
+        labels = np.zeros(n, dtype=np.int32)
+
+        for _ in range(iterations):
+            dists = ((pixels[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+            new_labels = dists.argmin(axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for i in range(k):
+                members = pixels[labels == i]
+                if len(members) == 0:
+                    centers[i] = pixels[rng.integers(0, n)]
+                else:
+                    centers[i] = members.mean(axis=0)
+        return centers, labels
+
+    @staticmethod
+    def _role(rank: int, rgb: tuple[int, int, int], hsl: dict[str, int], percentage: float) -> str:
+        if rank == 0:
+            return "主色"
+        if rank == 1:
+            return "辅助色"
+        spread = max(rgb) - min(rgb)
+        if spread < 18 and percentage > 15:
+            return "背景色"
+        if hsl["s"] >= 55 and percentage <= 20:
+            return "点缀色"
+        return "辅助色"
+
+    @staticmethod
+    def segment_colors(payload: SegmentRequest) -> dict:
+        if not payload.image_url:
+            return SegmentService._mock(payload)
+
+        image = load_image(payload.image_url)
+        image = resize_for_processing(image, max_side=512)
+
+        rgba = np.array(image)
+        rgb = rgba[:, :, :3]
+        alpha = rgba[:, :, 3]
+        valid = alpha > 0
+        pixels = rgb[valid].astype(np.float32)
+
+        if len(pixels) == 0:
+            return SegmentService._mock(payload)
+
+        centers, labels = SegmentService._kmeans(pixels, payload.color_count)
+
+        label_map = np.full(valid.shape, -1, dtype=np.int32)
+        label_map[valid] = labels
+
+        clusters: list[ClusterResult] = []
+        total = float(len(labels))
+        for i in range(len(centers)):
+            m = label_map == i
+            cnt = int(m.sum())
+            if cnt == 0:
+                continue
+            clusters.append(ClusterResult(center=centers[i], percentage=cnt * 100.0 / total, mask=m))
+
+        clusters.sort(key=lambda x: x.percentage, reverse=True)
+        image_id = f"img-{uuid4().hex[:12]}"
+
+        masks_for_preview: list[np.ndarray] = []
+        colors_for_preview: list[tuple[int, int, int]] = []
+        regions = []
+
+        for idx, c in enumerate(clusters[: payload.color_count], start=1):
+            rgb_tuple = tuple(int(round(x)) for x in c.center)
+            hex_color = rgb_to_hex(*rgb_tuple)
+            hsl = rgb_to_hsl(*rgb_tuple)
+            role = SegmentService._role(idx - 1, rgb_tuple, hsl, c.percentage)
+
+            raw_mask = mask_to_image(c.mask)
+            soft_mask = feather_mask(c.mask, radius=2.0)
+            mask_url = save_image(raw_mask, f"{image_id}-region-{idx}.png")
+            soft_mask_url = save_image(soft_mask, f"{image_id}-region-{idx}-soft.png")
+
+            regions.append(
+                {
+                    "id": f"region-{idx}",
+                    "name": f"{role}-{hex_color}",
+                    "hex": hex_color,
+                    "rgb": {"r": rgb_tuple[0], "g": rgb_tuple[1], "b": rgb_tuple[2]},
+                    "hsl": hsl,
+                    "percentage": round(c.percentage, 2),
+                    "role": role,
+                    "mask_url": mask_url,
+                    "soft_mask_url": soft_mask_url,
+                    "description": f"该区域为{role}，颜色接近 {hex_color}。",
+                }
+            )
+            masks_for_preview.append(c.mask)
+            colors_for_preview.append(rgb_tuple)
+
+        annotated = create_annotated_overlay(image, masks_for_preview, colors_for_preview)
+        annotated_url = save_image(annotated, f"{image_id}-annotated.png")
+
+        return {
+            "status": "success",
+            "message": "Segmentation completed with color clustering",
+            "image_id": image_id,
+            "original_image_url": payload.image_url,
+            "annotated_image_url": annotated_url,
+            "color_regions": regions,
         }
