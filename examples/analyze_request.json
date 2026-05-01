@@ -1,0 +1,19 @@
+{
+  "original_color_regions": [
+    {
+      "id": "region_1",
+      "pixel_ratio": 0.42,
+      "hsl": {"h": 210, "s": 45, "l": 52}
+    }
+  ],
+  "adjusted_color_regions": [
+    {
+      "id": "region_1",
+      "pixel_ratio": 0.42,
+      "hsl": {"h": 28, "s": 70, "l": 58}
+    }
+  ],
+  "before_image_url": "https://example.com/sample-image.jpg",
+  "after_image_url": "https://example.com/sample-image-recolor.jpg",
+  "user_goal": "让主视觉更温暖、更有活力"
+}
