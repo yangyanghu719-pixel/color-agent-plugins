@@ -157,7 +157,9 @@ docker run -p 8000:8000 color-agent-plugins
 
 仓库已提供 OpenAPI 3.0 描述文件：`docs/openapi.plugin.yaml`。
 
-部署到公网后，请先将该文件中的 `servers.url` 从 `https://YOUR_DEPLOYED_DOMAIN` 替换为真实 API 域名（例如 `https://api.example.com`）。
+当前 Render 部署地址为 `https://color-agent-plugins.onrender.com`。
+
+部署到公网后，请先将该文件中的 `servers.url` 从 `https://YOUR_DEPLOYED_DOMAIN` 替换为真实 API 域名；本仓库现已替换为上述 Render 地址。
 
 然后可在 HiAgent / 扣子等平台直接尝试导入该 YAML 文件；若平台暂不支持 YAML 导入，也可按文件中的 schema 手动创建三个工具：
 

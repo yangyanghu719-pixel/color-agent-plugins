@@ -50,7 +50,7 @@
 
 - `servers.url: https://YOUR_DEPLOYED_DOMAIN`
 
-替换为真实公网 API 域名（例如 `https://api.example.com`）。
+替换为真实公网 API 域名。当前 Render 部署地址为 `https://color-agent-plugins.onrender.com`。
 
 ### 2) 导入智能体平台
 

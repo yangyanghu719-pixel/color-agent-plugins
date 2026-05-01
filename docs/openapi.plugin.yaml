@@ -6,7 +6,7 @@ info:
     OpenAPI plugin description for agent platforms (HiAgent/扣子等),
     covering health check and three core tools: segment, recolor, analyze.
 servers:
-  - url: https://YOUR_DEPLOYED_DOMAIN
+  - url: https://color-agent-plugins.onrender.com
     description: Replace with your real deployed API domain.
 paths:
   /health:
