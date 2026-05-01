@@ -1,0 +1,308 @@
+openapi: 3.0.3
+info:
+  title: Color Agent Plugins API
+  version: 1.0.0
+  description: >-
+    OpenAPI plugin description for agent platforms (HiAgent/扣子等),
+    covering health check and three core tools: segment, recolor, analyze.
+servers:
+  - url: https://YOUR_DEPLOYED_DOMAIN
+    description: Replace with your real deployed API domain.
+paths:
+  /health:
+    get:
+      operationId: health_check
+      summary: Health check
+      description: Check whether the API service is running normally.
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /segment:
+    post:
+      operationId: segment_image_colors
+      summary: Segment image into major color regions
+      description: Identify the top color regions from an image and return region metadata plus mask resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentRequest'
+      responses:
+        '200':
+          description: Segmentation completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentResponse'
+  /recolor:
+    post:
+      operationId: recolor_image_region
+      summary: Recolor a target region with HSL adjustments
+      description: Apply local HSL recolor on one selected region based on image_id and target_region_id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecolorRequest'
+      responses:
+        '200':
+          description: Recolor preview generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecolorResponse'
+  /analyze:
+    post:
+      operationId: analyze_color_comparison
+      summary: Analyze color composition changes before and after adjustment
+      description: Analyze design-level impact between original and adjusted color regions and return actionable explanation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+      responses:
+        '200':
+          description: Analysis completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeResponse'
+
+components:
+  schemas:
+    HSL:
+      type: object
+      required: [h, s, l]
+      properties:
+        h:
+          type: integer
+          minimum: 0
+          maximum: 360
+        s:
+          type: integer
+          minimum: 0
+          maximum: 100
+        l:
+          type: integer
+          minimum: 0
+          maximum: 100
+    RGB:
+      type: object
+      required: [r, g, b]
+      properties:
+        r:
+          type: integer
+          minimum: 0
+          maximum: 255
+        g:
+          type: integer
+          minimum: 0
+          maximum: 255
+        b:
+          type: integer
+          minimum: 0
+          maximum: 255
+    ColorRegion:
+      type: object
+      required:
+        - id
+        - name
+        - hex
+        - rgb
+        - hsl
+        - percentage
+        - role
+        - mask_url
+        - soft_mask_url
+        - description
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        hex:
+          type: string
+        rgb:
+          $ref: '#/components/schemas/RGB'
+        hsl:
+          $ref: '#/components/schemas/HSL'
+        percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+        role:
+          type: string
+        mask_url:
+          type: string
+        soft_mask_url:
+          type: string
+        description:
+          type: string
+    SegmentRequest:
+      type: object
+      properties:
+        image_url:
+          type: string
+          nullable: true
+          description: Local path or URL that can be read by the service.
+        color_count:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 4
+    SegmentResponse:
+      type: object
+      required:
+        - status
+        - message
+        - image_id
+        - original_image_url
+        - annotated_image_url
+        - color_regions
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        image_id:
+          type: string
+        original_image_url:
+          type: string
+        annotated_image_url:
+          type: string
+        color_regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColorRegion'
+    RecolorRequest:
+      type: object
+      required:
+        - image_id
+        - original_image_url
+        - target_region_id
+        - original_hsl
+        - new_hsl
+      properties:
+        image_id:
+          type: string
+        original_image_url:
+          type: string
+          format: uri
+        target_region_id:
+          type: string
+        original_hsl:
+          $ref: '#/components/schemas/HSL'
+        new_hsl:
+          $ref: '#/components/schemas/HSL'
+    RecolorChange:
+      type: object
+      required: [hue_change, saturation_change, lightness_change]
+      properties:
+        hue_change:
+          type: integer
+        saturation_change:
+          type: integer
+        lightness_change:
+          type: integer
+    RecolorResponse:
+      type: object
+      required:
+        - status
+        - message
+        - target_region_id
+        - preview_image_url
+        - before_hsl
+        - after_hsl
+        - change
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        target_region_id:
+          type: string
+        preview_image_url:
+          type: string
+        before_hsl:
+          $ref: '#/components/schemas/HSL'
+        after_hsl:
+          $ref: '#/components/schemas/HSL'
+        change:
+          $ref: '#/components/schemas/RecolorChange'
+    AnalyzeRequest:
+      type: object
+      required:
+        - original_color_regions
+        - adjusted_color_regions
+        - before_image_url
+        - after_image_url
+      properties:
+        original_color_regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColorRegion'
+        adjusted_color_regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColorRegion'
+        before_image_url:
+          type: string
+          format: uri
+        after_image_url:
+          type: string
+          format: uri
+        user_goal:
+          type: string
+          nullable: true
+    AnalyzeResponse:
+      type: object
+      required:
+        - status
+        - message
+        - tags
+        - color_relation
+        - visual_feeling
+        - suitable_scenario
+        - summary
+        - ai_explanation
+        - risk
+        - next_step
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        color_relation:
+          type: string
+        visual_feeling:
+          type: string
+        suitable_scenario:
+          type: string
+        summary:
+          type: string
+        ai_explanation:
+          type: string
+        risk:
+          type: string
+        next_step:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+        message:
+          type: string
