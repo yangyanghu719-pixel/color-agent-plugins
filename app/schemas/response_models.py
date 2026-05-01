@@ -22,9 +22,9 @@ class SegmentResponse(BaseModel):
 
 
 class RecolorChangeModel(BaseModel):
-    delta_h: int
-    delta_s: int
-    delta_l: int
+    hue_change: int
+    saturation_change: int
+    lightness_change: int
 
 
 class RecolorResponse(BaseModel):
