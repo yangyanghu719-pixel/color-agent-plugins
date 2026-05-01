@@ -35,6 +35,10 @@ def test_segment_structure(tmp_path):
     assert 2 <= len(body["color_regions"]) <= 4
     assert body["annotated_image_url"]
 
+    image_id = body["image_id"]
+    segment_result = Path("static/outputs") / image_id / "segment_result.json"
+    assert segment_result.exists()
+
     for region in body["color_regions"]:
         assert set(region.keys()) >= {
             "id", "name", "hex", "rgb", "hsl", "percentage", "role", "mask_url", "soft_mask_url", "description"
@@ -43,18 +47,36 @@ def test_segment_structure(tmp_path):
         assert region["soft_mask_url"]
 
 
-def test_recolor_hsl_change():
+def test_recolor_mask_based_preview(tmp_path):
+    image_path = tmp_path / "recolor-test.png"
+    _create_test_image(image_path)
+
+    segment_resp = client.post("/segment", json={"image_url": str(image_path), "color_count": 4})
+    assert segment_resp.status_code == 200
+    segment_body = segment_resp.json()
+
+    target_region = segment_body["color_regions"][0]
     payload = {
-        "image_id": "img-mock-001",
-        "original_image_url": "https://example.com/demo.jpg",
-        "target_region_id": "region-1",
-        "original_hsl": {"h": 10, "s": 50, "l": 40},
-        "new_hsl": {"h": 20, "s": 55, "l": 35},
+        "image_id": segment_body["image_id"],
+        "original_image_url": "https://example.com/unreachable-demo.jpg",
+        "target_region_id": target_region["id"],
+        "original_hsl": target_region["hsl"],
+        "new_hsl": {
+            "h": (target_region["hsl"]["h"] + 20) % 360,
+            "s": min(100, target_region["hsl"]["s"] + 5),
+            "l": max(0, target_region["hsl"]["l"] - 5),
+        },
     }
     resp = client.post("/recolor", json=payload)
     assert resp.status_code == 200
-    change = resp.json()["change"]
-    assert change == {"delta_h": 10, "delta_s": 5, "delta_l": -5}
+
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["preview_image_url"]
+    assert body["change"] == {"hue_change": 20, "saturation_change": 5, "lightness_change": -5}
+
+    preview_path = Path(body["preview_image_url"].replace("/static/", "static/"))
+    assert preview_path.exists()
 
 
 def test_analyze_returns_explanation():

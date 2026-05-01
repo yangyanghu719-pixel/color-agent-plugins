@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
@@ -8,7 +10,7 @@ from PIL import Image
 
 from app.schemas.request_models import SegmentRequest
 from app.utils.color_convert import rgb_to_hex, rgb_to_hsl
-from app.utils.image_io import load_image, resize_for_processing, save_image
+from app.utils.image_io import load_image, resize_for_processing
 from app.utils.mask_utils import create_annotated_overlay, feather_mask, mask_to_image
 
 
@@ -20,6 +22,18 @@ class ClusterResult:
 
 
 class SegmentService:
+    @staticmethod
+    def _output_dir(image_id: str) -> Path:
+        path = Path("static/outputs") / image_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _save_local_image(image: Image.Image, image_id: str, filename: str) -> str:
+        out_path = SegmentService._output_dir(image_id) / filename
+        image.save(out_path)
+        return f"/static/outputs/{image_id}/{filename}"
+
     @staticmethod
     def _mock(payload: SegmentRequest) -> dict:
         image_url = payload.image_url or "https://example.com/images/default.jpg"
@@ -105,6 +119,10 @@ class SegmentService:
         colors_for_preview: list[tuple[int, int, int]] = []
         regions = []
 
+        original_image_filename = "original.png"
+        original_image_path = SegmentService._output_dir(image_id) / original_image_filename
+        image.save(original_image_path)
+
         for idx, c in enumerate(clusters[: payload.color_count], start=1):
             rgb_tuple = tuple(int(round(x)) for x in c.center)
             hex_color = rgb_to_hex(*rgb_tuple)
@@ -113,8 +131,8 @@ class SegmentService:
 
             raw_mask = mask_to_image(c.mask)
             soft_mask = feather_mask(c.mask, radius=2.0)
-            mask_url = save_image(raw_mask, f"{image_id}-region-{idx}.png")
-            soft_mask_url = save_image(soft_mask, f"{image_id}-region-{idx}-soft.png")
+            mask_url = SegmentService._save_local_image(raw_mask, image_id, f"region-{idx}.png")
+            soft_mask_url = SegmentService._save_local_image(soft_mask, image_id, f"region-{idx}-soft.png")
 
             regions.append(
                 {
@@ -134,7 +152,30 @@ class SegmentService:
             colors_for_preview.append(rgb_tuple)
 
         annotated = create_annotated_overlay(image, masks_for_preview, colors_for_preview)
-        annotated_url = save_image(annotated, f"{image_id}-annotated.png")
+        annotated_url = SegmentService._save_local_image(annotated, image_id, "annotated.png")
+
+        segment_result = {
+            "image_id": image_id,
+            "original_image_path": str(original_image_path),
+            "annotated_image_path": str(SegmentService._output_dir(image_id) / "annotated.png"),
+            "color_regions": [
+                {
+                    "id": region["id"],
+                    "name": region["name"],
+                    "hex": region["hex"],
+                    "rgb": region["rgb"],
+                    "hsl": region["hsl"],
+                    "percentage": region["percentage"],
+                    "role": region["role"],
+                    "mask_path": str(SegmentService._output_dir(image_id) / f"{region['id']}.png"),
+                    "soft_mask_path": str(SegmentService._output_dir(image_id) / f"{region['id']}-soft.png"),
+                }
+                for region in regions
+            ],
+        }
+
+        with (SegmentService._output_dir(image_id) / "segment_result.json").open("w", encoding="utf-8") as f:
+            json.dump(segment_result, f, ensure_ascii=False, indent=2)
 
         return {
             "status": "success",
