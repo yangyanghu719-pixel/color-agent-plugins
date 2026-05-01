@@ -38,3 +38,33 @@
 3. 把 `image_id` 和 `color_regions` 作为会话上下文缓存，供下一步调色与分析复用。
 4. 在智能体提示词中明确工具调用顺序，避免跳过 `segment` 直接调用 `recolor`。
 5. 可将 `examples/*.json` 作为工具调用样例，降低集成出错率。
+
+
+## 基于 OpenAPI 文件接入（推荐）
+
+仓库提供了 `docs/openapi.plugin.yaml`，用于对接 HiAgent / 扣子等智能体平台。
+
+### 1) 先替换部署域名
+
+部署后，先把 `openapi.plugin.yaml` 中的：
+
+- `servers.url: https://YOUR_DEPLOYED_DOMAIN`
+
+替换为真实公网 API 域名（例如 `https://api.example.com`）。
+
+### 2) 导入智能体平台
+
+- 优先直接导入 `docs/openapi.plugin.yaml`。
+- 如果平台不支持 YAML 导入，可依据该文件手动创建 3 个 HTTP POST 工具：
+  - `segment_image_colors` → `/segment`
+  - `recolor_image_region` → `/recolor`
+  - `analyze_color_comparison` → `/analyze`
+
+### 3) 工具调用顺序（建议固化在提示词中）
+
+用户上传图片  
+→ `segment_image_colors`  
+→ 用户选择色块并调整 HSL  
+→ `recolor_image_region`  
+→ 用户确认分析  
+→ `analyze_color_comparison`

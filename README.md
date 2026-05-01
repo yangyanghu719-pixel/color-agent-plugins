@@ -151,3 +151,25 @@ docker run -p 8000:8000 color-agent-plugins
 - 使用 `Python 3.11`；
 - 自动安装 `requirements.txt` 依赖并执行 `pytest -q`；
 - 额外执行一次 `docker build -t color-agent-plugins .` 做镜像构建检查。
+
+
+## OpenAPI 插件描述文件（智能体平台接入）
+
+仓库已提供 OpenAPI 3.0 描述文件：`docs/openapi.plugin.yaml`。
+
+部署到公网后，请先将该文件中的 `servers.url` 从 `https://YOUR_DEPLOYED_DOMAIN` 替换为真实 API 域名（例如 `https://api.example.com`）。
+
+然后可在 HiAgent / 扣子等平台直接尝试导入该 YAML 文件；若平台暂不支持 YAML 导入，也可按文件中的 schema 手动创建三个工具：
+
+- `segment_image_colors`（`POST /segment`）
+- `recolor_image_region`（`POST /recolor`）
+- `analyze_color_comparison`（`POST /analyze`）
+
+推荐调用顺序：
+
+用户上传图片  
+→ `segment_image_colors`  
+→ 用户选择色块并调整 HSL  
+→ `recolor_image_region`  
+→ 用户确认分析  
+→ `analyze_color_comparison`
