@@ -110,3 +110,44 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
+
+## 工程验收
+
+### 本地验收顺序
+
+```bash
+pip install -r requirements.txt
+pytest -q
+uvicorn app.main:app --reload
+```
+
+启动后访问：
+
+- `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/docs`
+
+也可以运行内置脚本做基础 smoke test：
+
+```bash
+python scripts/smoke_test.py
+```
+
+### Docker 验收顺序
+
+```bash
+docker build -t color-agent-plugins .
+docker run -p 8000:8000 color-agent-plugins
+```
+
+容器启动后访问：
+
+- `http://127.0.0.1:8000/health`
+
+### CI 说明
+
+仓库已新增 GitHub Actions（`.github/workflows/test.yml`）：
+
+- 在 `push` 和 `pull_request` 时自动运行；
+- 使用 `Python 3.11`；
+- 自动安装 `requirements.txt` 依赖并执行 `pytest -q`；
+- 额外执行一次 `docker build -t color-agent-plugins .` 做镜像构建检查。
