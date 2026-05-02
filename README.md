@@ -5,6 +5,8 @@
 ## 接口概览
 
 - `GET /health`：服务健康检查
+- `GET /experiment`：色彩构成实验台网页
+- `POST /upload-image`：上传本地图片并返回可用于实验台的图片地址
 - `POST /segment`：识别图片主要色彩区域
 - `POST /recolor`：基于区域 mask 做局部 HSL 调色
 - `POST /analyze`：分析调色前后色彩构成变化
@@ -23,7 +25,15 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-### 3) 运行测试
+### 3) 访问实验台
+
+启动后打开：
+
+- `http://127.0.0.1:8000/experiment`
+
+该页面面向学生手动进行色彩构成实验，支持输入图片 URL 或上传本地图片，调用现有 `/segment`、`/recolor`、`/analyze` 接口完成主色识别、H/S/L 手动调整、确认调整与结果分析。
+
+### 4) 运行测试
 
 ```bash
 pytest -q
@@ -101,7 +111,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 服务启动后：
 
 1. 访问 `GET /health`，应返回正常状态。
-2. 打开 `http://127.0.0.1:8000/docs`（Swagger），按顺序测试：
+2. 打开 `http://127.0.0.1:8000/experiment`，上传图片或输入图片 URL 后可进行色彩实验。
+3. 打开 `http://127.0.0.1:8000/docs`（Swagger），按顺序测试：
    - `/segment`
    - `/recolor`
    - `/analyze`
@@ -124,6 +135,7 @@ uvicorn app.main:app --reload
 启动后访问：
 
 - `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/experiment`
 - `http://127.0.0.1:8000/docs`
 
 也可以运行内置脚本做基础 smoke test：
@@ -142,6 +154,7 @@ docker run -p 8000:8000 color-agent-plugins
 容器启动后访问：
 
 - `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/experiment`
 
 ### CI 说明
 
