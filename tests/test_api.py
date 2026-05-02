@@ -147,3 +147,26 @@ def test_analyze_complementary_relation_and_contrast():
     assert resp.status_code == 200
     assert "近互补/互补色" in body["color_relation"]
     assert any(tag in body["tags"] for tag in ["对比增强", "主体更突出"])
+
+
+def test_experiment_page():
+    resp = client.get("/experiment")
+    assert resp.status_code == 200
+    assert "色彩构成实验台" in resp.text
+
+
+def test_upload_image_success(tmp_path):
+    image_path = tmp_path / "upload-test.png"
+    _create_test_image(image_path)
+
+    with image_path.open("rb") as f:
+        resp = client.post("/upload-image", files={"file": ("upload-test.png", f, "image/png")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["image_url"]
+    assert body["display_url"]
+
+    saved_path = Path(body["image_url"])
+    assert saved_path.exists()

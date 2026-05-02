@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>色彩构成实验台</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background:#f5f7fb; color:#222; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .card { background:#fff; border-radius:10px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,.08); margin-bottom:14px; }
+    .row { display:grid; gap:14px; grid-template-columns: 1fr 1fr; }
+    .row-3 { display:grid; gap:12px; grid-template-columns: 1fr auto auto; }
+    input[type="text"]{ width:100%; padding:8px; }
+    button{ padding:8px 12px; cursor:pointer; }
+    .images{ min-height:240px; display:grid; gap:10px; grid-template-columns: 1fr 1fr; }
+    .image-box img{ max-width:100%; border:1px solid #ddd; border-radius:6px; }
+    .swatches{ display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:10px; }
+    .swatch{ border:2px solid #e2e2e2; border-radius:8px; padding:8px; cursor:pointer; }
+    .swatch.active{ border-color:#2666f6; }
+    .chip{ width:100%; height:40px; border-radius:6px; margin-bottom:8px; }
+    .slider-group label{ display:block; margin:8px 0; }
+    .muted{ color:#666; font-size:13px; }
+    #loading{ display:none; color:#1a56db; font-weight:600; }
+    #error{ color:#b42318; white-space:pre-wrap; }
+    pre{ white-space:pre-wrap; background:#fafafa; border:1px solid #eee; padding:10px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>色彩构成实验台</h1>
+  <p>学生主动上传图片、选择色块并拖动 H / S / L 滑杆观察画面变化。系统负责呈现前后对比，并在确认后解释这次调色带来的色彩构成变化。</p>
+  <p class="muted">这是色彩构成学习实验工具：学生主动操作，系统只负责呈现和解释。当前区域识别和调色基于颜色聚类与 mask，是近似实验，不是 Photoshop 级精修。</p>
+
+  <div class="card row-3">
+    <input id="imageUrl" type="text" placeholder="输入图片 URL 或先上传本地图片" />
+    <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.webp" />
+    <button id="segmentBtn">识别主色区域</button>
+  </div>
+
+  <div id="loading">处理中...</div>
+  <div id="error"></div>
+
+  <div class="row">
+    <div class="card">
+      <h3>左侧原图 / 主色标注图区域</h3>
+      <div class="images">
+        <div class="image-box"><div>原图</div><img id="originalImg" /></div>
+        <div class="image-box"><div>主色标注图</div><img id="annotatedImg" /></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>右侧调整后预览区域</h3>
+      <img id="previewImg" />
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>4 个色块卡片区域</h3>
+    <div id="swatches" class="swatches"></div>
+  </div>
+
+  <div class="card">
+    <h3>当前选中色块信息</h3>
+    <div id="currentRegion">未选择色块</div>
+    <div class="slider-group">
+      <label>H 色相 (0–360): <input id="hSlider" type="range" min="0" max="360" value="0" /> <span id="hVal">0</span></label>
+      <label>S 饱和度 (0–100): <input id="sSlider" type="range" min="0" max="100" value="0" /> <span id="sVal">0</span></label>
+      <label>L 明度 (0–100): <input id="lSlider" type="range" min="0" max="100" value="0" /> <span id="lVal">0</span></label>
+    </div>
+    <button id="confirmAdjustBtn">确认本次调整</button>
+    <button id="confirmAnalyzeBtn">确认并分析</button>
+  </div>
+
+  <div class="card">
+    <h3>分析结果展示区域</h3>
+    <pre id="analysisResult">暂无结果</pre>
+  </div>
+</div>
+<script>
+const API_BASE = window.location.origin;
+let segmentData = null, selectedRegion = null, lastPreview = null;
+const $ = id => document.getElementById(id);
+const setLoading = on => $("loading").style.display = on ? "block" : "none";
+const setError = msg => $("error").textContent = msg || "";
+
+["hSlider","sSlider","lSlider"].forEach(id => $(id).addEventListener("input", () => {
+  $(id[0]+"Val").textContent = $(id).value;
+}));
+
+function renderSwatches(regions){
+  const wrap = $("swatches"); wrap.innerHTML="";
+  regions.slice(0,4).forEach((r) => {
+    const card = document.createElement("div"); card.className = "swatch";
+    card.innerHTML = `<div class="chip" style="background:${r.hex}"></div><div>#${r.id}</div><div>${r.hex}</div><div>${r.percentage}%</div><div>HSL(${r.hsl.h},${r.hsl.s},${r.hsl.l})</div><div>${r.role}</div>`;
+    card.onclick = () => selectRegion(r, card);
+    wrap.appendChild(card);
+  });
+}
+function selectRegion(r, card){
+  selectedRegion = r;
+  document.querySelectorAll('.swatch').forEach(n=>n.classList.remove('active'));
+  card.classList.add('active');
+  $("currentRegion").textContent = `已选 ${r.id} ${r.hex} role=${r.role}`;
+  $("hSlider").value = r.hsl.h; $("sSlider").value = r.hsl.s; $("lSlider").value = r.hsl.l;
+  $("hVal").textContent=r.hsl.h; $("sVal").textContent=r.hsl.s; $("lVal").textContent=r.hsl.l;
+}
+
+async function doSegment(imageUrl){
+  const resp = await fetch(`${API_BASE}/segment`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({image_url:imageUrl, color_count:4})});
+  const body = await resp.json(); if(!resp.ok || body.status!=="success") throw new Error(body.message||"segment 失败");
+  segmentData = body; $("originalImg").src = imageUrl; $("annotatedImg").src = body.annotated_image_url; renderSwatches(body.color_regions);
+}
+
+$("segmentBtn").onclick = async () => {
+  try{ setError(""); setLoading(true);
+    let imageUrl = $("imageUrl").value.trim(); const file = $("fileInput").files[0];
+    if(file){
+      const fd = new FormData(); fd.append("file", file);
+      const upResp = await fetch(`${API_BASE}/upload-image`, {method:"POST", body:fd});
+      const upBody = await upResp.json(); if(!upResp.ok || upBody.status!=="success") throw new Error(upBody.message||"upload 失败");
+      imageUrl = upBody.image_url; $("imageUrl").value = upBody.image_url; $("originalImg").src = upBody.display_url;
+    }
+    if(!imageUrl) throw new Error("请先输入图片 URL 或上传本地图片");
+    await doSegment(imageUrl);
+  }catch(e){ setError(e.message); } finally{ setLoading(false); }
+};
+
+$("confirmAdjustBtn").onclick = async () => {
+  if(!segmentData || !selectedRegion) return setError("请先识别并选择色块");
+  try{ setError(""); setLoading(true);
+    const new_hsl = {h:+$("hSlider").value, s:+$("sSlider").value, l:+$("lSlider").value};
+    const resp = await fetch(`${API_BASE}/recolor`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({image_id:segmentData.image_id, original_image_url:segmentData.original_image_url, target_region_id:selectedRegion.id, original_hsl:selectedRegion.hsl, new_hsl})});
+    const body = await resp.json(); if(!resp.ok || body.status!=="success") throw new Error(body.message||"recolor 失败");
+    lastPreview = body.preview_image_url; $("previewImg").src = body.preview_image_url;
+  }catch(e){ setError(e.message);} finally{ setLoading(false);}
+};
+
+$("confirmAnalyzeBtn").onclick = async () => {
+  if(!segmentData || !selectedRegion || !lastPreview) return setError("请先完成一次确认调整");
+  try{ setLoading(true); setError("");
+    const adjusted = segmentData.color_regions.map(r => r.id===selectedRegion.id ? {...r, hsl:{h:+$("hSlider").value,s:+$("sSlider").value,l:+$("lSlider").value}} : r);
+    const payload = {original_color_regions: segmentData.color_regions, adjusted_color_regions: adjusted, before_image_url: segmentData.original_image_url, after_image_url: lastPreview};
+    const resp = await fetch(`${API_BASE}/analyze`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+    const body = await resp.json(); if(!resp.ok || body.status!=="success") throw new Error(body.message||"analyze 失败");
+    $("analysisResult").textContent = JSON.stringify({tags:body.tags,color_relation:body.color_relation,visual_feeling:body.visual_feeling,suitable_scenario:body.suitable_scenario,summary:body.summary,ai_explanation:body.ai_explanation,risk:body.risk,next_step:body.next_step}, null, 2);
+  }catch(e){ setError(e.message);} finally{ setLoading(false);}  
+};
+</script>
+</body>
+</html>
