@@ -152,7 +152,8 @@ def test_analyze_complementary_relation_and_contrast():
 def test_experiment_page():
     resp = client.get("/experiment")
     assert resp.status_code == 200
-    assert "色彩构成实验台" in resp.text
+    for keyword in ["色彩构成实验台", "实验导师", "上传图片", "生成实验反馈"]:
+        assert keyword in resp.text
 
 
 def test_upload_image_success(tmp_path):
