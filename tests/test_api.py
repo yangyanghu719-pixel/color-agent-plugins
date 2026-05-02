@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -37,6 +38,30 @@ def test_health():
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
+
+
+def test_experiment_page():
+    resp = client.get("/experiment")
+    assert resp.status_code == 200
+    assert "色彩构成实验台" in resp.text
+
+
+def test_upload_image():
+    img = Image.new("RGB", (12, 12), "red")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
+    resp = client.post(
+        "/upload-image",
+        files={"file": ("test.png", buf, "image/png")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["image_url"].startswith("static/uploads/")
+    assert body["display_url"].startswith("/static/uploads/")
+    assert Path(body["image_url"]).exists()
 
 
 def test_segment_structure(tmp_path):
