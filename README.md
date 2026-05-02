@@ -175,3 +175,29 @@ docker run -p 8000:8000 color-agent-plugins
 → `recolor_image_region`  
 → 用户确认分析  
 → `analyze_color_comparison`
+
+## 网页实验台（/experiment）
+
+新增“色彩构成实验台”页面：`GET /experiment`。
+
+功能说明：
+
+1. 支持输入图片 URL；
+2. 支持本地图片上传（`POST /upload-image`，支持 png/jpg/jpeg/webp）；
+3. 支持识别主色区域（调用 `POST /segment`）；
+4. 支持学生手动选择色块（展示编号、HEX、占比、HSL、role）；
+5. 支持手动拖动 H/S/L 滑杆并“确认本次调整”（调用 `POST /recolor`）；
+6. 支持“确认并分析”（构造 `adjusted_color_regions` 后调用 `POST /analyze`）；
+7. 当前仍是 MVP 近似实验：基于颜色聚类与 mask，不是 Photoshop 级修图。
+
+### 本地访问
+
+启动服务后访问：
+
+- `http://127.0.0.1:8000/experiment`
+
+### Render 访问
+
+将域名替换为你的 Render 服务域名：
+
+- `https://<你的-render-域名>/experiment`
