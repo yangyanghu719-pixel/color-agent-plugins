@@ -1,6 +1,8 @@
 from pathlib import Path
 from uuid import uuid4
 
+import json
+import logging
 import os
 
 import httpx
@@ -19,6 +21,8 @@ app = FastAPI(title="Color Agent Plugins API", version="0.1.0")
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+logger = logging.getLogger(__name__)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -45,6 +49,85 @@ def analyze(payload: AnalyzeRequest) -> dict:
 
 def _is_absolute_url(url: str) -> bool:
     return url.startswith("http://") or url.startswith("https://")
+
+
+@app.get("/hiagent-health-test")
+def hiagent_health_test() -> dict:
+    logger.info("hiagent health test start")
+
+    api_base = os.getenv("HIAGENT_API_BASE", "").rstrip("/")
+    api_key = os.getenv("HIAGENT_API_KEY", "")
+    user_id = os.getenv("HIAGENT_USER_ID", "coloragent")
+
+    if not api_base or not api_key:
+        return {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置"}
+
+    logger.info("hiagent api base: %s", api_base)
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                f"{api_base}/create_conversation",
+                headers={"Apikey": api_key, "Content-Type": "application/json"},
+                json={"UserID": user_id},
+            )
+    except httpx.TimeoutException:
+        logger.warning("hiagent create_conversation timeout")
+        return {
+            "status": "failed",
+            "stage": "create_conversation",
+            "message": "HiAgent create_conversation timed out",
+        }
+    except Exception:
+        logger.exception("hiagent create_conversation error")
+        return {
+            "status": "failed",
+            "stage": "create_conversation",
+            "message": "HiAgent create_conversation HTTP error",
+        }
+
+    body_text = resp.text or ""
+    preview = body_text[:300]
+
+    if not (200 <= resp.status_code < 300):
+        logger.warning("hiagent create_conversation http error")
+        return {
+            "status": "failed",
+            "stage": "create_conversation",
+            "message": "HiAgent create_conversation HTTP error",
+            "status_code": resp.status_code,
+            "response_preview": preview,
+        }
+
+    try:
+        parsed = resp.json()
+    except json.JSONDecodeError:
+        logger.warning("hiagent create_conversation http error")
+        return {
+            "status": "failed",
+            "stage": "create_conversation",
+            "message": "HiAgent 返回不是有效 JSON",
+            "response_preview": preview,
+        }
+
+    app_conversation_id = parsed.get("Conversation", {}).get("AppConversationID")
+    if app_conversation_id:
+        logger.info("hiagent create_conversation success")
+        return {
+            "status": "ok",
+            "stage": "create_conversation",
+            "message": "HiAgent create_conversation success",
+            "conversation_id_exists": True,
+        }
+
+    logger.warning("hiagent create_conversation http error")
+    return {
+        "status": "failed",
+        "stage": "create_conversation",
+        "message": "HiAgent create_conversation HTTP error",
+        "status_code": resp.status_code,
+        "response_preview": preview,
+    }
 
 
 @app.post("/hiagent-feedback")

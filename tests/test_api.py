@@ -352,3 +352,80 @@ def test_hiagent_feedback_success_with_mock(monkeypatch):
     body = resp.json()
     assert body["status"] == "success"
     assert body["answer"] == "测试反馈"
+
+
+def test_hiagent_health_test_config_missing(monkeypatch):
+    monkeypatch.delenv("HIAGENT_API_BASE", raising=False)
+    monkeypatch.delenv("HIAGENT_API_KEY", raising=False)
+
+    resp = client.get("/hiagent-health-test")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置"}
+
+
+def test_hiagent_health_test_success(monkeypatch):
+    monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
+    monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+    monkeypatch.setenv("HIAGENT_USER_ID", "u-1")
+
+    class DummyResponse:
+        status_code = 200
+        text = '{"Conversation": {"AppConversationID": "abc"}}'
+
+        def json(self):
+            return {"Conversation": {"AppConversationID": "abc"}}
+
+    class DummyClient:
+        def __init__(self, timeout):
+            assert timeout == 30
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers, json):
+            assert url == "https://example.com/create_conversation"
+            assert headers["Apikey"] == "fake-key"
+            assert json == {"UserID": "u-1"}
+            return DummyResponse()
+
+    monkeypatch.setattr("app.main.httpx.Client", DummyClient)
+
+    resp = client.get("/hiagent-health-test")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "ok",
+        "stage": "create_conversation",
+        "message": "HiAgent create_conversation success",
+        "conversation_id_exists": True,
+    }
+
+
+def test_hiagent_health_test_timeout(monkeypatch):
+    monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
+    monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+
+    class DummyClient:
+        def __init__(self, timeout):
+            assert timeout == 30
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, headers, json):
+            raise __import__("httpx").TimeoutException("timeout")
+
+    monkeypatch.setattr("app.main.httpx.Client", DummyClient)
+
+    resp = client.get("/hiagent-health-test")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "failed",
+        "stage": "create_conversation",
+        "message": "HiAgent create_conversation timed out",
+    }
