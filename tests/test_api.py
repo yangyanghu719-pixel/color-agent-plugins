@@ -62,7 +62,7 @@ def test_segment_structure(tmp_path):
         assert region["soft_mask_url"]
 
 
-def test_recolor_mask_based_preview(tmp_path):
+def test_recolor_binary_mask_preview(tmp_path):
     image_path = tmp_path / "recolor-test.png"
     _create_test_image(image_path)
 
@@ -89,6 +89,7 @@ def test_recolor_mask_based_preview(tmp_path):
     assert body["status"] == "success"
     assert body["preview_image_url"]
     assert body["change"] == {"hue_change": 20, "saturation_change": 5, "lightness_change": -5}
+
 
     preview_path = Path(body["preview_image_url"].replace("/static/", "static/"))
     assert preview_path.exists()
@@ -226,3 +227,42 @@ def test_recolor_accepts_full_static_url(tmp_path):
     resp = client.post("/recolor", json=payload)
     assert resp.status_code == 200
     assert resp.json()["status"] == "success"
+
+
+def test_recolor_prefers_mask_path_over_soft_mask_path(tmp_path):
+    image_path = tmp_path / "recolor-mask-priority.png"
+    _create_test_image(image_path)
+    seg = client.post("/segment", json={"image_url": str(image_path), "color_count": 4}).json()
+    region = seg["color_regions"][0]
+    segment_result_path = Path("static/outputs") / seg["image_id"] / "segment_result.json"
+    payload = __import__("json").loads(segment_result_path.read_text(encoding="utf-8"))
+    target = next(r for r in payload["color_regions"] if r["id"] == region["id"])
+    target["soft_mask_path"] = "missing-soft-mask.png"
+    segment_result_path.write_text(__import__("json").dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    req = {"image_id": seg["image_id"], "original_image_url": "https://example.com/unreachable.jpg", "target_region_id": region["id"], "original_hsl": region["hsl"], "new_hsl": {"h": (region["hsl"]["h"] + 10) % 360, "s": region["hsl"]["s"], "l": region["hsl"]["l"]}}
+    resp = client.post("/recolor", json=req)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+
+
+def test_recolor_changes_only_selected_pixels(tmp_path):
+    image_path = tmp_path / "recolor-binary-only.png"
+    _create_test_image(image_path)
+    seg = client.post("/segment", json={"image_url": str(image_path), "color_count": 4}).json()
+    region = seg["color_regions"][0]
+    req = {"image_id": seg["image_id"], "original_image_url": "https://example.com/unreachable.jpg", "target_region_id": region["id"], "original_hsl": region["hsl"], "new_hsl": {"h": (region["hsl"]["h"] + 60) % 360, "s": min(100, region["hsl"]["s"] + 10), "l": region["hsl"]["l"]}}
+    resp = client.post("/recolor", json=req).json()
+    assert resp["status"] == "success"
+
+    segment_result_path = Path("static/outputs") / seg["image_id"] / "segment_result.json"
+    result = __import__("json").loads(segment_result_path.read_text(encoding="utf-8"))
+    target = next(r for r in result["color_regions"] if r["id"] == region["id"])
+
+    import numpy as np
+    base = np.array(Image.open(result["original_image_path"]).convert("RGB"))
+    out = np.array(Image.open(Path(resp["preview_image_url"].replace('/static/', 'static/'))).convert("RGB"))
+    mask = np.array(Image.open(target["mask_path"]).convert("L")) > 127
+
+    assert np.array_equal(base[~mask], out[~mask])
+    assert np.any(base[mask] != out[mask])
