@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -49,3 +49,10 @@ class AnalyzeRequest(BaseModel):
     before_image_url: HttpUrl
     after_image_url: HttpUrl
     user_goal: Optional[str] = None
+
+
+class HiAgentFeedbackRequest(BaseModel):
+    original_image_url: HttpUrl
+    adjusted_image_url: HttpUrl
+    color_regions: List[Any]
+    adjustment_history: List[Any]
