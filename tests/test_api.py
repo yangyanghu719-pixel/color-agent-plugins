@@ -163,7 +163,7 @@ def test_experiment_page():
         "S 饱和度",
         "L 明度",
         "保存该色块调整",
-        "已保存调整",
+        "已保存调整区域",
         "生成实验反馈",
         "请先选择一个主色区域",
     ]:
@@ -208,3 +208,21 @@ def test_recolor_uses_working_image_and_static_path(tmp_path):
     payload = __import__("json").loads(segment_result_path.read_text(encoding="utf-8"))
     assert payload["working_image_path"].endswith(Path(b2["preview_image_url"]).name)
     assert len(payload["adjustment_history"]) >= 2
+
+
+def test_recolor_accepts_full_static_url(tmp_path):
+    image_path = tmp_path / "recolor-full-url.png"
+    _create_test_image(image_path)
+    seg = client.post("/segment", json={"image_url": str(image_path), "color_count": 4}).json()
+    region = seg["color_regions"][0]
+    full_url = f"https://color-agent-plugins.onrender.com{seg['original_image_url']}"
+    payload = {
+        "image_id": seg["image_id"],
+        "original_image_url": full_url,
+        "target_region_id": region["id"],
+        "original_hsl": region["hsl"],
+        "new_hsl": {"h": (region["hsl"]["h"] + 20) % 360, "s": region["hsl"]["s"], "l": region["hsl"]["l"]},
+    }
+    resp = client.post("/recolor", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
