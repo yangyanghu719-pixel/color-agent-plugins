@@ -210,3 +210,12 @@ docker run -p 8000:8000 color-agent-plugins
 将域名替换为你的 Render 服务域名：
 
 - `https://<你的-render-域名>/experiment`
+
+
+## HiAgent 实验导师反馈
+
+- `/experiment` 页面“生成实验反馈”默认调用后端 `/hiagent-feedback`，由 HiAgent 生成最终实验反馈。
+- 后端通过 `/hiagent-feedback -> create_conversation -> chat_query_v2`（`ResponseMode=blocking`）代理调用 HiAgent。
+- 需要配置环境变量：`HIAGENT_API_BASE`、`HIAGENT_API_KEY`、`HIAGENT_USER_ID`（可选 `HIAGENT_APP_ID`）。
+- 网页实验台继续负责图像处理、binary mask 直接 HSL 调色、H/S/L 滑杆与保存。
+- HiAgent 负责色彩关系、视觉感受、适用场景、画面变化解释等导师分析。

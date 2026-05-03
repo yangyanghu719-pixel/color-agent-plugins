@@ -1,3 +1,5 @@
+import os
+
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -286,3 +288,67 @@ def test_recolor_preview_size_matches_processed_original(tmp_path):
     processed = Image.open(Path(seg["processed_image_url"].replace("/static/", "static/")))
     preview = Image.open(Path(resp["preview_image_url"].replace("/static/", "static/")))
     assert processed.size == preview.size
+
+
+def test_hiagent_feedback_missing_env():
+    payload = {
+        "original_image_url": "https://example.com/original.png",
+        "adjusted_image_url": "https://example.com/adjusted.png",
+        "color_regions": [],
+        "adjustment_history": [{"region_id": "r1"}],
+    }
+    old_base = os.environ.pop("HIAGENT_API_BASE", None)
+    old_key = os.environ.pop("HIAGENT_API_KEY", None)
+    try:
+        resp = client.post("/hiagent-feedback", json=payload)
+        assert resp.status_code == 200
+        assert "HiAgent 尚未配置" in resp.json()["message"]
+    finally:
+        if old_base is not None: os.environ["HIAGENT_API_BASE"] = old_base
+        if old_key is not None: os.environ["HIAGENT_API_KEY"] = old_key
+
+
+def test_hiagent_feedback_empty_history():
+    resp = client.post("/hiagent-feedback", json={
+        "original_image_url": "https://example.com/original.png",
+        "adjusted_image_url": "https://example.com/adjusted.png",
+        "color_regions": [],
+        "adjustment_history": [],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["message"] == "请先保存至少一次色块调整，再生成实验反馈。"
+
+
+def test_hiagent_feedback_success_with_mock(monkeypatch):
+    os.environ["HIAGENT_API_BASE"] = "https://mock.hiagent.local"
+    os.environ["HIAGENT_API_KEY"] = "k"
+    os.environ["HIAGENT_USER_ID"] = "u1"
+
+    class MockResp:
+        def __init__(self, data): self._data = data
+        def raise_for_status(self): return None
+        def json(self): return self._data
+
+    class MockClient:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, url, headers=None, json=None):
+            if url.endswith('/create_conversation'):
+                return MockResp({"Conversation": {"AppConversationID": "conv-1"}})
+            if url.endswith('/chat_query_v2'):
+                assert json["ResponseMode"] == "blocking"
+                return MockResp({"answer": "测试反馈"})
+            raise AssertionError(url)
+
+    monkeypatch.setattr('app.main.httpx.Client', lambda timeout=30: MockClient())
+
+    resp = client.post('/hiagent-feedback', json={
+        "original_image_url": "https://example.com/o.png",
+        "adjusted_image_url": "https://example.com/a.png",
+        "color_regions": [{"id": "region-1"}],
+        "adjustment_history": [{"region_id": "region-1", "original": {"h": 1, "s": 2, "l": 3}, "current": {"h": 4, "s": 5, "l": 6}}],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["answer"] == "测试反馈"
