@@ -163,8 +163,9 @@ def test_experiment_page():
         "H 色相",
         "S 饱和度",
         "L 明度",
-        "记录这次调整",
+        "保存该色块调整",
         "生成实验反馈",
+        "请选择一个主色区域",
     ]:
         assert keyword in resp.text
 
