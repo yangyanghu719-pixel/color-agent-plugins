@@ -51,6 +51,33 @@ def _is_absolute_url(url: str) -> bool:
     return url.startswith("http://") or url.startswith("https://")
 
 
+
+
+def _extract_hiagent_error_text(resp: httpx.Response | None = None, exc: Exception | None = None) -> str:
+    parts = []
+    if resp is not None:
+        parts.append(resp.text or "")
+        try:
+            parts.append(json.dumps(resp.json(), ensure_ascii=False))
+        except Exception:
+            pass
+    if exc is not None:
+        parts.append(str(exc))
+    return " ".join(p for p in parts if p)
+
+
+def _hiagent_error_message(resp: httpx.Response | None = None, exc: Exception | None = None, timeout: bool = False) -> str:
+    if timeout:
+        return "HiAgent 请求超时，可能是网络访问限制或接口响应过慢。"
+
+    if resp is not None and resp.status_code in (401, 403):
+        return "HiAgent 鉴权失败，请检查 HIAGENT_API_KEY 和 HIAGENT_APP_ID。"
+
+    error_text = _extract_hiagent_error_text(resp=resp, exc=exc)
+    if "AppID is empty" in error_text:
+        return "HiAgent 请求缺少 APPID，请检查 Render 环境变量 HIAGENT_APP_ID 是否已设置。"
+
+    return "HiAgent 请求失败，请稍后重试。"
 @app.get("/hiagent-health-test")
 def hiagent_health_test() -> dict:
     logger.info("hiagent health test start")
@@ -58,9 +85,12 @@ def hiagent_health_test() -> dict:
     api_base = os.getenv("HIAGENT_API_BASE", "").rstrip("/")
     api_key = os.getenv("HIAGENT_API_KEY", "")
     user_id = os.getenv("HIAGENT_USER_ID", "coloragent")
+    app_id = os.getenv("HIAGENT_APP_ID", "")
 
     if not api_base or not api_key:
         return {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置"}
+    if not app_id:
+        return {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置 APPID，请先在 Render 环境变量中设置 HIAGENT_APP_ID。"}
 
     logger.info("hiagent api base: %s", api_base)
 
@@ -68,23 +98,15 @@ def hiagent_health_test() -> dict:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
                 f"{api_base}/create_conversation",
-                headers={"Apikey": api_key, "Content-Type": "application/json"},
-                json={"UserID": user_id},
+                headers={"Apikey": api_key, "AppID": app_id, "Content-Type": "application/json"},
+                json={"UserID": user_id, "AppID": app_id},
             )
     except httpx.TimeoutException:
         logger.warning("hiagent create_conversation timeout")
-        return {
-            "status": "failed",
-            "stage": "create_conversation",
-            "message": "HiAgent create_conversation timed out",
-        }
-    except Exception:
+        return {"status": "failed", "stage": "create_conversation", "message": _hiagent_error_message(timeout=True)}
+    except Exception as exc:
         logger.exception("hiagent create_conversation error")
-        return {
-            "status": "failed",
-            "stage": "create_conversation",
-            "message": "HiAgent create_conversation HTTP error",
-        }
+        return {"status": "failed", "stage": "create_conversation", "message": _hiagent_error_message(exc=exc)}
 
     body_text = resp.text or ""
     preview = body_text[:300]
@@ -94,7 +116,7 @@ def hiagent_health_test() -> dict:
         return {
             "status": "failed",
             "stage": "create_conversation",
-            "message": "HiAgent create_conversation HTTP error",
+            "message": _hiagent_error_message(resp=resp),
             "status_code": resp.status_code,
             "response_preview": preview,
         }
@@ -118,13 +140,14 @@ def hiagent_health_test() -> dict:
             "stage": "create_conversation",
             "message": "HiAgent create_conversation success",
             "conversation_id_exists": True,
+            "app_id_configured": True,
         }
 
     logger.warning("hiagent create_conversation http error")
     return {
         "status": "failed",
         "stage": "create_conversation",
-        "message": "HiAgent create_conversation HTTP error",
+        "message": _hiagent_error_message(resp=resp),
         "status_code": resp.status_code,
         "response_preview": preview,
     }
@@ -147,10 +170,12 @@ def hiagent_feedback(payload: HiAgentFeedbackRequest) -> dict:
     api_base = os.getenv("HIAGENT_API_BASE", "").rstrip("/")
     api_key = os.getenv("HIAGENT_API_KEY", "")
     user_id = os.getenv("HIAGENT_USER_ID", "color-agent-user")
-    _app_id = os.getenv("HIAGENT_APP_ID", "")
+    app_id = os.getenv("HIAGENT_APP_ID", "")
 
     if not api_base or not api_key:
         return {"status": "failed", "message": "HiAgent 尚未配置，请先在 Render 环境变量中设置 HIAGENT_API_BASE 和 HIAGENT_API_KEY。"}
+    if not app_id:
+        return {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置 APPID，请先在 Render 环境变量中设置 HIAGENT_APP_ID。"}
 
     query = f"""你是色彩构成实验导师。以下是学生完成的一次色彩构成实验资料。
 
@@ -189,33 +214,42 @@ def hiagent_feedback(payload: HiAgentFeedbackRequest) -> dict:
         with httpx.Client(timeout=30) as client:
             conv_resp = client.post(
                 f"{api_base}/create_conversation",
-                headers={"Apikey": api_key, "Content-Type": "application/json"},
-                json={"UserID": user_id},
+                headers={"Apikey": api_key, "AppID": app_id, "Content-Type": "application/json"},
+                json={"UserID": user_id, "AppID": app_id},
             )
             conv_resp.raise_for_status()
             conv_body = conv_resp.json()
+            if "AppID is empty" in _extract_hiagent_error_text(resp=conv_resp):
+                return {"status": "failed", "message": _hiagent_error_message(resp=conv_resp)}
             app_conversation_id = conv_body.get("Conversation", {}).get("AppConversationID")
             if not app_conversation_id:
                 return {"status": "failed", "message": "HiAgent 创建会话失败：未返回 AppConversationID。"}
+    except httpx.TimeoutException:
+        return {"status": "failed", "message": _hiagent_error_message(timeout=True)}
     except Exception as exc:
-        return {"status": "failed", "message": f"HiAgent 创建会话失败：{exc}"}
+        return {"status": "failed", "message": _hiagent_error_message(exc=exc)}
 
     try:
         with httpx.Client(timeout=60) as client:
             chat_resp = client.post(
                 f"{api_base}/chat_query_v2",
-                headers={"Apikey": api_key, "Content-Type": "application/json"},
+                headers={"Apikey": api_key, "AppID": app_id, "Content-Type": "application/json"},
                 json={
                     "UserID": user_id,
                     "AppConversationID": app_conversation_id,
                     "Query": query,
                     "ResponseMode": "blocking",
+                    "AppID": app_id,
                 },
             )
             chat_resp.raise_for_status()
             chat_body = chat_resp.json()
+            if "AppID is empty" in _extract_hiagent_error_text(resp=chat_resp):
+                return {"status": "failed", "message": _hiagent_error_message(resp=chat_resp)}
+    except httpx.TimeoutException:
+        return {"status": "failed", "message": _hiagent_error_message(timeout=True)}
     except Exception as exc:
-        return {"status": "failed", "message": f"HiAgent 分析请求失败：{exc}"}
+        return {"status": "failed", "message": _hiagent_error_message(exc=exc)}
 
     answer = chat_body.get("answer")
     if not answer:
