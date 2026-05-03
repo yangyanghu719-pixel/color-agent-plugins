@@ -308,6 +308,56 @@ def test_hiagent_feedback_missing_env():
         if old_key is not None: os.environ["HIAGENT_API_KEY"] = old_key
 
 
+
+
+def test_hiagent_feedback_appid_missing(monkeypatch):
+    payload = {
+        "original_image_url": "https://example.com/original.png",
+        "adjusted_image_url": "https://example.com/adjusted.png",
+        "color_regions": [],
+        "adjustment_history": [{"region_id": "r1"}],
+    }
+    monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
+    monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+    monkeypatch.delenv("HIAGENT_APP_ID", raising=False)
+
+    resp = client.post("/hiagent-feedback", json=payload)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置 APPID，请先在 Render 环境变量中设置 HIAGENT_APP_ID。"}
+
+
+def test_hiagent_feedback_appid_empty_error_message(monkeypatch):
+    monkeypatch.setenv("HIAGENT_API_BASE", "https://mock.hiagent.local")
+    monkeypatch.setenv("HIAGENT_API_KEY", "k")
+    monkeypatch.setenv("HIAGENT_USER_ID", "u1")
+    monkeypatch.setenv("HIAGENT_APP_ID", "app-1")
+
+    class MockResp:
+        status_code = 400
+        text = '{"ResponseMetadata":{"Error":{"Message":"Bad request: AppID is empty"}}}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ResponseMetadata": {"Error": {"Message": "Bad request: AppID is empty"}}}
+
+    class MockClient:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, url, headers=None, json=None):
+            return MockResp()
+
+    monkeypatch.setattr('app.main.httpx.Client', lambda timeout=30: MockClient())
+
+    resp = client.post('/hiagent-feedback', json={
+        "original_image_url": "https://example.com/o.png",
+        "adjusted_image_url": "https://example.com/a.png",
+        "color_regions": [{"id": "region-1"}],
+        "adjustment_history": [{"region_id": "region-1", "original": {"h": 1, "s": 2, "l": 3}, "current": {"h": 4, "s": 5, "l": 6}}],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["message"] == "HiAgent 请求缺少 APPID，请检查 Render 环境变量 HIAGENT_APP_ID 是否已设置。"
 def test_hiagent_feedback_empty_history():
     resp = client.post("/hiagent-feedback", json={
         "original_image_url": "https://example.com/original.png",
@@ -323,9 +373,13 @@ def test_hiagent_feedback_success_with_mock(monkeypatch):
     os.environ["HIAGENT_API_BASE"] = "https://mock.hiagent.local"
     os.environ["HIAGENT_API_KEY"] = "k"
     os.environ["HIAGENT_USER_ID"] = "u1"
+    os.environ["HIAGENT_APP_ID"] = "app-1"
 
     class MockResp:
-        def __init__(self, data): self._data = data
+        def __init__(self, data):
+            self._data = data
+            self.text = __import__("json").dumps(data, ensure_ascii=False)
+            self.status_code = 200
         def raise_for_status(self): return None
         def json(self): return self._data
 
@@ -334,9 +388,13 @@ def test_hiagent_feedback_success_with_mock(monkeypatch):
         def __exit__(self, *args): return False
         def post(self, url, headers=None, json=None):
             if url.endswith('/create_conversation'):
+                assert headers["AppID"] == "app-1"
+                assert json["AppID"] == "app-1"
                 return MockResp({"Conversation": {"AppConversationID": "conv-1"}})
             if url.endswith('/chat_query_v2'):
+                assert headers["AppID"] == "app-1"
                 assert json["ResponseMode"] == "blocking"
+                assert json["AppID"] == "app-1"
                 return MockResp({"answer": "测试反馈"})
             raise AssertionError(url)
 
@@ -363,10 +421,23 @@ def test_hiagent_health_test_config_missing(monkeypatch):
     assert resp.json() == {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置"}
 
 
+def test_hiagent_health_test_appid_missing(monkeypatch):
+    monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
+    monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+    monkeypatch.setenv("HIAGENT_APP_ID", "app-9")
+    monkeypatch.delenv("HIAGENT_APP_ID", raising=False)
+
+    resp = client.get("/hiagent-health-test")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "failed", "stage": "config", "message": "HiAgent 尚未配置 APPID，请先在 Render 环境变量中设置 HIAGENT_APP_ID。"}
+
+
 def test_hiagent_health_test_success(monkeypatch):
     monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
     monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+    monkeypatch.setenv("HIAGENT_APP_ID", "app-9")
     monkeypatch.setenv("HIAGENT_USER_ID", "u-1")
+    monkeypatch.setenv("HIAGENT_APP_ID", "app-9")
 
     class DummyResponse:
         status_code = 200
@@ -388,7 +459,8 @@ def test_hiagent_health_test_success(monkeypatch):
         def post(self, url, headers, json):
             assert url == "https://example.com/create_conversation"
             assert headers["Apikey"] == "fake-key"
-            assert json == {"UserID": "u-1"}
+            assert headers["AppID"] == "app-9"
+            assert json == {"UserID": "u-1", "AppID": "app-9"}
             return DummyResponse()
 
     monkeypatch.setattr("app.main.httpx.Client", DummyClient)
@@ -400,12 +472,14 @@ def test_hiagent_health_test_success(monkeypatch):
         "stage": "create_conversation",
         "message": "HiAgent create_conversation success",
         "conversation_id_exists": True,
+        "app_id_configured": True,
     }
 
 
 def test_hiagent_health_test_timeout(monkeypatch):
     monkeypatch.setenv("HIAGENT_API_BASE", "https://example.com")
     monkeypatch.setenv("HIAGENT_API_KEY", "fake-key")
+    monkeypatch.setenv("HIAGENT_APP_ID", "app-9")
 
     class DummyClient:
         def __init__(self, timeout):
@@ -427,5 +501,5 @@ def test_hiagent_health_test_timeout(monkeypatch):
     assert resp.json() == {
         "status": "failed",
         "stage": "create_conversation",
-        "message": "HiAgent create_conversation timed out",
+        "message": "HiAgent 请求超时，可能是网络访问限制或接口响应过慢。",
     }
