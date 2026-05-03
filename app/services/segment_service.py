@@ -184,6 +184,7 @@ class SegmentService:
             "message": "Segmentation completed with color clustering",
             "image_id": image_id,
             "original_image_url": payload.image_url,
+            "processed_image_url": f"/static/outputs/{image_id}/original.png",
             "annotated_image_url": annotated_url,
             "color_regions": regions,
         }
