@@ -55,14 +55,15 @@ class RecolorService:
         if not region:
             return {"status": "error", "message": "未找到对应的色彩区域。", "target_region_id": payload.target_region_id, "preview_image_url": "", "before_hsl": payload.original_hsl.model_dump(), "after_hsl": payload.new_hsl.model_dump(), "change": {"hue_change": 0, "saturation_change": 0, "lightness_change": 0}}
 
-        soft_mask_path = Path(region.get("soft_mask_path", ""))
-        if not soft_mask_path.exists():
+        mask_path_str = region.get("mask_path") or region.get("soft_mask_path", "")
+        mask_path = Path(mask_path_str)
+        if not mask_path.exists():
             return {"status": "error", "message": "目标区域 mask 文件不存在，无法进行局部调色。", "target_region_id": payload.target_region_id, "preview_image_url": "", "before_hsl": payload.original_hsl.model_dump(), "after_hsl": payload.new_hsl.model_dump(), "change": {"hue_change": 0, "saturation_change": 0, "lightness_change": 0}}
 
         original = RecolorService._load_image_with_fallback(payload, segment_result)
         original_rgb = np.array(original.convert("RGB"), dtype=np.float32)
-        mask = np.array(Image.open(soft_mask_path).convert("L"), dtype=np.float32) / 255.0
-        mask = np.clip(mask, 0.0, 1.0)
+        mask_gray = np.array(Image.open(mask_path).convert("L"), dtype=np.uint8)
+        selected = mask_gray > 127
         before = clamp_hsl(payload.original_hsl.h, payload.original_hsl.s, payload.original_hsl.l)
         after = clamp_hsl(payload.new_hsl.h, payload.new_hsl.s, payload.new_hsl.l)
         delta_h, delta_s, delta_l = after["h"] - before["h"], after["s"] - before["s"], after["l"] - before["l"]
@@ -76,13 +77,15 @@ class RecolorService:
         l = np.clip(hls[:, 1] * 100.0 + delta_l, 0.0, 100.0)
         s = np.clip(hls[:, 2] * 100.0 + delta_s, 0.0, 100.0)
         adjusted = np.array([colorsys.hls_to_rgb((hh % 360.0) / 360.0, ll / 100.0, ss / 100.0) for hh, ll, ss in zip(h, l, s)], dtype=np.float32).reshape(original_rgb.shape)
-        blended = (original_rgb * (1.0 - mask[..., None]) + adjusted * 255.0 * mask[..., None]).clip(0, 255).astype(np.uint8)
+        adjusted_rgb = (adjusted * 255.0).clip(0, 255).astype(np.uint8)
+        output_rgb = original_rgb.astype(np.uint8)
+        output_rgb[selected] = adjusted_rgb[selected]
 
         output_dir = Path("static/outputs") / payload.image_id
         output_dir.mkdir(parents=True, exist_ok=True)
         output_name = f"recolor_{payload.target_region_id}_{hashlib.md5(f'{payload.target_region_id}-{before}-{after}'.encode('utf-8')).hexdigest()[:8]}.png"
         output_path = output_dir / output_name
-        Image.fromarray(blended, mode="RGB").save(output_path)
+        Image.fromarray(output_rgb, mode="RGB").save(output_path)
 
         segment_result["working_image_path"] = str(output_path)
         segment_result.setdefault("adjustment_history", []).append({"target_region_id": payload.target_region_id, "before_hsl": before, "after_hsl": after})

@@ -6,7 +6,7 @@
 
 - `GET /health`：服务健康检查
 - `POST /segment`：识别图片主要色彩区域
-- `POST /recolor`：基于区域 mask 做局部 HSL 调色
+- `POST /recolor`：基于 binary mask 做局部像素级 HSL 直接调色
 - `POST /analyze`：分析调色前后色彩构成变化
 
 ## 本地运行
@@ -192,7 +192,8 @@ docker run -p 8000:8000 color-agent-plugins
 8. 点击“保存该色块调整”后调用 `POST /recolor`，成功后 working image 更新并写入已保存调整记录，可连续调整多个色块；
 9. 点击“生成实验反馈”后调用 `POST /analyze`，分析基于已保存调整记录与最新 region HSL 状态；
 10. 提供“实验导师”侧边栏 UI 占位，当前版本不接入 HiAgent；
-11. 当前仍是 MVP 近似实验：基于颜色聚类与 mask，不是 Photoshop 级精修。
+11. `/recolor` 与前端实时预览均改为 binary mask（阈值 >127）直接修改选区像素 H/S/L，非选区完全不变，不再使用 soft mask alpha blend 蒙版混合。
+12. 这种方式更适合教学实验，可直接观察选中色块 H/S/L 的相对变化；当前仍是颜色聚类近似实验，不是 Photoshop 级精修。
 12. 点击“保存该色块调整”时，前端会将 `static/...` 或 `/static/...` 路径转换为完整 URL 后再调用 `POST /recolor`；
 13. H/S/L 三条滑杆使用颜色渐变轨道分别表达色相、饱和度、明度语义；
 14. 若 Render 服务重启/重新部署，临时上传文件与识别结果可能失效，需要重新上传并识别图片。
