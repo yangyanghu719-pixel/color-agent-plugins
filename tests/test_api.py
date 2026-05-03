@@ -156,7 +156,6 @@ def test_experiment_page():
         "色彩构成实验台",
         "实验导师",
         "上传原图",
-        "当前选中色块区域",
         "调整后整图实时预览",
         "主色区域选择",
         "H/S/L 调色面板",
@@ -164,8 +163,9 @@ def test_experiment_page():
         "S 饱和度",
         "L 明度",
         "保存该色块调整",
+        "已保存调整",
         "生成实验反馈",
-        "请选择一个主色区域",
+        "请先选择一个主色区域",
     ]:
         assert keyword in resp.text
 
@@ -185,3 +185,26 @@ def test_upload_image_success(tmp_path):
 
     saved_path = Path(body["image_url"])
     assert saved_path.exists()
+
+
+def test_recolor_uses_working_image_and_static_path(tmp_path):
+    image_path = tmp_path / "recolor-seq.png"
+    _create_test_image(image_path)
+    seg = client.post("/segment", json={"image_url": str(image_path), "color_count": 4}).json()
+    r1 = seg["color_regions"][0]
+    p1 = {"image_id": seg["image_id"], "original_image_url": "https://example.com/unreachable.jpg", "target_region_id": r1["id"], "original_hsl": r1["hsl"], "new_hsl": {"h": (r1["hsl"]["h"] + 30) % 360, "s": r1["hsl"]["s"], "l": r1["hsl"]["l"]}}
+    b1 = client.post("/recolor", json=p1).json()
+    assert b1["status"] == "success"
+
+    segment_result_path = Path("static/outputs") / seg["image_id"] / "segment_result.json"
+    segment_result = __import__("json").loads(segment_result_path.read_text(encoding="utf-8"))
+    segment_result["working_image_path"] = f"static/outputs/{seg['image_id']}/{Path(b1['preview_image_url']).name}"
+    segment_result_path.write_text(__import__("json").dumps(segment_result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    p2 = {"image_id": seg["image_id"], "original_image_url": "https://example.com/unreachable.jpg", "target_region_id": r1["id"], "original_hsl": p1["new_hsl"], "new_hsl": {"h": (p1["new_hsl"]["h"] + 15) % 360, "s": p1["new_hsl"]["s"], "l": p1["new_hsl"]["l"]}}
+    b2 = client.post("/recolor", json=p2).json()
+    assert b2["status"] == "success"
+
+    payload = __import__("json").loads(segment_result_path.read_text(encoding="utf-8"))
+    assert payload["working_image_path"].endswith(Path(b2["preview_image_url"]).name)
+    assert len(payload["adjustment_history"]) >= 2

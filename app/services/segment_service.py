@@ -157,6 +157,8 @@ class SegmentService:
         segment_result = {
             "image_id": image_id,
             "original_image_path": str(original_image_path),
+            "working_image_path": str(original_image_path),
+            "adjustment_history": [],
             "annotated_image_path": str(SegmentService._output_dir(image_id) / "annotated.png"),
             "color_regions": [
                 {
