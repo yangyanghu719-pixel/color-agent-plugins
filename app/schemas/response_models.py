@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ class SegmentResponse(BaseModel):
     message: str
     image_id: str
     original_image_url: str
+    processed_image_url: Optional[str] = None
     annotated_image_url: str
     color_regions: List[ColorRegionModel]
 

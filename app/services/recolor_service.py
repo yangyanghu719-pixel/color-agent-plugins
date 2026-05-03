@@ -61,7 +61,7 @@ class RecolorService:
             return {"status": "error", "message": "目标区域 mask 文件不存在，无法进行局部调色。", "target_region_id": payload.target_region_id, "preview_image_url": "", "before_hsl": payload.original_hsl.model_dump(), "after_hsl": payload.new_hsl.model_dump(), "change": {"hue_change": 0, "saturation_change": 0, "lightness_change": 0}}
 
         original = RecolorService._load_image_with_fallback(payload, segment_result)
-        original_rgb = np.array(original.convert("RGB"), dtype=np.float32)
+        original_rgb = np.array(original.convert("RGB"), dtype=np.uint8)
         mask_gray = np.array(Image.open(mask_path).convert("L"), dtype=np.uint8)
         selected = mask_gray > 127
         before = clamp_hsl(payload.original_hsl.h, payload.original_hsl.s, payload.original_hsl.l)
@@ -70,16 +70,19 @@ class RecolorService:
 
         import colorsys
 
-        rgb_norm = original_rgb / 255.0
-        flat = np.stack([rgb_norm[..., 0].flatten(), rgb_norm[..., 1].flatten(), rgb_norm[..., 2].flatten()], axis=1)
-        hls = np.array([colorsys.rgb_to_hls(px[0], px[1], px[2]) for px in flat], dtype=np.float32)
-        h = (hls[:, 0] * 360.0 + delta_h) % 360.0
-        l = np.clip(hls[:, 1] * 100.0 + delta_l, 0.0, 100.0)
-        s = np.clip(hls[:, 2] * 100.0 + delta_s, 0.0, 100.0)
-        adjusted = np.array([colorsys.hls_to_rgb((hh % 360.0) / 360.0, ll / 100.0, ss / 100.0) for hh, ll, ss in zip(h, l, s)], dtype=np.float32).reshape(original_rgb.shape)
-        adjusted_rgb = (adjusted * 255.0).clip(0, 255).astype(np.uint8)
-        output_rgb = original_rgb.astype(np.uint8)
-        output_rgb[selected] = adjusted_rgb[selected]
+        output_rgb = original_rgb.copy()
+        selected_pixels = original_rgb[selected]
+        if selected_pixels.size:
+            selected_norm = selected_pixels.astype(np.float32) / 255.0
+            selected_hls = np.array([colorsys.rgb_to_hls(px[0], px[1], px[2]) for px in selected_norm], dtype=np.float32)
+            h = (selected_hls[:, 0] * 360.0 + delta_h) % 360.0
+            l = np.clip(selected_hls[:, 1] * 100.0 + delta_l, 0.0, 100.0)
+            s = np.clip(selected_hls[:, 2] * 100.0 + delta_s, 0.0, 100.0)
+            adjusted_selected = np.array(
+                [colorsys.hls_to_rgb((hh % 360.0) / 360.0, ll / 100.0, ss / 100.0) for hh, ll, ss in zip(h, l, s)],
+                dtype=np.float32,
+            )
+            output_rgb[selected] = (adjusted_selected * 255.0).clip(0, 255).astype(np.uint8)
 
         output_dir = Path("static/outputs") / payload.image_id
         output_dir.mkdir(parents=True, exist_ok=True)

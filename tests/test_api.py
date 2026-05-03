@@ -47,6 +47,7 @@ def test_segment_structure(tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "success"
+    assert body["processed_image_url"].endswith(f"/static/outputs/{body['image_id']}/original.png")
     assert 2 <= len(body["color_regions"]) <= 4
     assert body["annotated_image_url"]
 
@@ -266,3 +267,22 @@ def test_recolor_changes_only_selected_pixels(tmp_path):
 
     assert np.array_equal(base[~mask], out[~mask])
     assert np.any(base[mask] != out[mask])
+
+
+def test_recolor_preview_size_matches_processed_original(tmp_path):
+    image_path = tmp_path / "recolor-size.png"
+    _create_test_image(image_path)
+    seg = client.post("/segment", json={"image_url": str(image_path), "color_count": 4}).json()
+    region = seg["color_regions"][0]
+    req = {
+        "image_id": seg["image_id"],
+        "original_image_url": f"https://color-agent-plugins.onrender.com{seg['processed_image_url']}",
+        "target_region_id": region["id"],
+        "original_hsl": region["hsl"],
+        "new_hsl": {"h": (region["hsl"]["h"] + 30) % 360, "s": region["hsl"]["s"], "l": region["hsl"]["l"]},
+    }
+    resp = client.post("/recolor", json=req).json()
+    assert resp["status"] == "success"
+    processed = Image.open(Path(seg["processed_image_url"].replace("/static/", "static/")))
+    preview = Image.open(Path(resp["preview_image_url"].replace("/static/", "static/")))
+    assert processed.size == preview.size
