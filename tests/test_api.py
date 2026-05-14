@@ -329,6 +329,24 @@ def test_analyze_invalid_before_image_path():
     assert resp.json()["status"] == "error"
 
 
+def test_analyze_rejects_path_traversal(tmp_path):
+    before = tmp_path / "before.png"; _create_test_image(before)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": "../secret.png", "after_image_url": str(before)})
+    assert resp.status_code == 200
+    assert "path traversal" in resp.json()["message"]
+
+
+def test_analyze_accepts_static_path(tmp_path):
+    before = tmp_path / "before.png"; _create_test_image(before)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": "/static/uploads/not-found.png"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "error"
+
+
 def test_analyze_invalid_after_image_path(tmp_path):
     before = tmp_path / "before.png"; _create_test_image(before)
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
@@ -336,3 +354,11 @@ def test_analyze_invalid_after_image_path(tmp_path):
     resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": "static/uploads/not-found2.png"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "error"
+
+
+def test_experiment_not_use_legacy_analysis_fields():
+    resp = client.get('/experiment')
+    assert resp.status_code == 200
+    assert 'visual_feeling' not in resp.text
+    assert 'ai_explanation' not in resp.text
+    assert 'next_step' not in resp.text
