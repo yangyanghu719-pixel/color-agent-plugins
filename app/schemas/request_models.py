@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class HSLModel(BaseModel):
@@ -38,9 +38,19 @@ class SegmentRequest(BaseModel):
 class RecolorRequest(BaseModel):
     image_id: str
     original_image_url: HttpUrl
-    target_region_id: str
+    region_id: Optional[str] = None
+    target_region_id: Optional[str] = None
     original_hsl: HSLModel
     new_hsl: HSLModel
+
+    @model_validator(mode="after")
+    def normalize_region_id(self):
+        rid = self.region_id or self.target_region_id
+        if not rid:
+            raise ValueError("region_id is required")
+        self.region_id = rid
+        self.target_region_id = rid
+        return self
 
 
 class AnalyzeRequest(BaseModel):
@@ -49,10 +59,3 @@ class AnalyzeRequest(BaseModel):
     before_image_url: HttpUrl
     after_image_url: HttpUrl
     user_goal: Optional[str] = None
-
-
-class HiAgentFeedbackRequest(BaseModel):
-    original_image_url: HttpUrl
-    adjusted_image_url: HttpUrl
-    color_regions: List[Any]
-    adjustment_history: List[Any]

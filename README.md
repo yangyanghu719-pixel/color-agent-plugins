@@ -1,13 +1,24 @@
-# Color Agent Plugins
+# Color Agent Web App
 
-这是「色彩构成实验 Agent」的 FastAPI 插件服务，提供三个核心接口：`/segment`、`/recolor`、`/analyze`。
+Color Agent Web App 是一个面向设计学生的图像色彩调整与分析 Web 应用。
 
-## 接口概览
+## 当前核心流程
 
-- `GET /health`：服务健康检查
-- `POST /segment`：识别图片主要色彩区域
-- `POST /recolor`：基于 binary mask 做局部像素级 HSL 直接调色
-- `POST /analyze`：分析调色前后色彩构成变化
+1. 上传图片
+2. 提取主要色块
+3. 选择色块
+4. 使用 HSL 调整颜色
+5. 生成调整后图片
+6. 基于原图与调整后图进行色彩分析
+7. 后续接入固定任务型图像分析 Agent
+
+## 当前已有功能
+
+- `GET /health`
+- `POST /segment`
+- `POST /recolor`
+- `POST /analyze`
+- `GET /experiment`
 
 ## 本地运行
 
@@ -17,206 +28,35 @@
 pip install -r requirements.txt
 ```
 
-### 2) 启动服务
+### 2) 启动 FastAPI
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-### 3) 运行测试
+### 3) 打开实验台
+
+访问：`http://127.0.0.1:8000/experiment`
+
+## 测试
 
 ```bash
 pytest -q
 ```
 
-## Docker 运行
+## 部署说明
 
-### 构建镜像
+这是一个标准 FastAPI Web App，可直接部署到 Render 或其他 Python Web 服务平台（如 Fly.io、Railway、自托管 Docker/K8s）。
 
-```bash
-docker build -t color-agent-plugins .
-```
+## API 调用概览
 
-### 运行容器
+- `/segment`：输入图片并生成主色区域、mask 和标注结果。
+- `/recolor`：基于选定区域做像素级 HSL 调整，输出新的实验图。
+- `/analyze`：输入调色前后区域信息和图片链接，输出结构化分析建议。
 
-```bash
-docker run -p 8000:8000 color-agent-plugins
-```
+## 下一步计划
 
-容器内默认启动命令：
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-## API 完整调用流程
-
-### Step 1: 调用 `POST /segment`
-
-输入：`image_url`
-
-输出：
-- `image_id`
-- `color_regions`
-- `mask_url`
-- `annotated_image_url`
-
-示例请求见：`examples/segment_request.json`
-
-### Step 2: 调用 `POST /recolor`
-
-输入：
-- `image_id`
-- `target_region_id`
-- `original_hsl`
-- `new_hsl`
-
-输出：
-- `preview_image_url`
-
-示例请求见：`examples/recolor_request.json`
-
-### Step 3: 调用 `POST /analyze`
-
-输入：
-- `original_color_regions`
-- `adjusted_color_regions`
-- `before_image_url`
-- `after_image_url`
-- `user_goal`
-
-输出：
-- `tags`
-- `color_relation`
-- `visual_feeling`
-- `summary`
-- `ai_explanation`
-- `risk`
-- `next_step`
-
-示例请求见：`examples/analyze_request.json`
-
-## 最小验收标准（API Smoke Test）
-
-服务启动后：
-
-1. 访问 `GET /health`，应返回正常状态。
-2. 打开 `http://127.0.0.1:8000/docs`（Swagger），按顺序测试：
-   - `/segment`
-   - `/recolor`
-   - `/analyze`
-
-## Swagger 文档地址
-
-- Swagger UI: `http://127.0.0.1:8000/docs`
-- ReDoc: `http://127.0.0.1:8000/redoc`
-
-## 工程验收
-
-### 本地验收顺序
-
-```bash
-pip install -r requirements.txt
-pytest -q
-uvicorn app.main:app --reload
-```
-
-启动后访问：
-
-- `http://127.0.0.1:8000/health`
-- `http://127.0.0.1:8000/docs`
-
-也可以运行内置脚本做基础 smoke test：
-
-```bash
-python scripts/smoke_test.py
-```
-
-### Docker 验收顺序
-
-```bash
-docker build -t color-agent-plugins .
-docker run -p 8000:8000 color-agent-plugins
-```
-
-容器启动后访问：
-
-- `http://127.0.0.1:8000/health`
-
-### CI 说明
-
-仓库已新增 GitHub Actions（`.github/workflows/test.yml`）：
-
-- 在 `push` 和 `pull_request` 时自动运行；
-- 使用 `Python 3.11`；
-- 自动安装 `requirements.txt` 依赖并执行 `pytest -q`；
-- 额外执行一次 `docker build -t color-agent-plugins .` 做镜像构建检查。
-
-
-## OpenAPI 插件描述文件（智能体平台接入）
-
-仓库已提供 OpenAPI 3.0 描述文件：`docs/openapi.plugin.yaml`。
-
-当前 Render 部署地址为 `https://color-agent-plugins.onrender.com`。
-
-部署到公网后，请先将该文件中的 `servers.url` 从 `https://YOUR_DEPLOYED_DOMAIN` 替换为真实 API 域名；本仓库现已替换为上述 Render 地址。
-
-然后可在 HiAgent / 扣子等平台直接尝试导入该 YAML 文件；若平台暂不支持 YAML 导入，也可按文件中的 schema 手动创建三个工具：
-
-- `segment_image_colors`（`POST /segment`）
-- `recolor_image_region`（`POST /recolor`）
-- `analyze_color_comparison`（`POST /analyze`）
-
-推荐调用顺序：
-
-用户上传图片  
-→ `segment_image_colors`  
-→ 用户选择色块并调整 HSL  
-→ `recolor_image_region`  
-→ 用户确认分析  
-→ `analyze_color_comparison`
-
-## 网页实验台（/experiment）
-
-新增“色彩构成实验台”页面：`GET /experiment`。
-
-功能说明：
-
-1. `/experiment` 是学生主动色彩实验页面，聚焦“上传、观察、操作、比较、解释”的学习流程；
-2. 只保留本地图片上传入口（`POST /upload-image`，支持 png/jpg/jpeg/webp），不再提供在线图片 URL 输入；
-3. 支持识别 4 个主色区域（调用 `POST /segment`）；
-4. 页面布局为两段式：上方两栏图像区（上传原图 / 当前实验图实时预览）+ 下方双栏操作区（左侧主色区域选择 / 右侧 H/S/L 调色面板）；
-5. 已删除“当前选中色块区域”定位图，学生通过右侧整图实时预览观察当前色块影响范围；
-6. 色块区域仅支持 click 选中，hover 仅用于卡片轻微样式反馈，不改变当前选区也不触发图像绘制；
-7. `/segment` 后实验底图统一使用处理后的 `static/outputs/{image_id}/original.png`（`processed_image_url`），左侧原图与右侧当前实验图采用同一尺寸体系，避免保存后尺寸跳变；
-8. 点击“保存该色块调整”后调用 `POST /recolor`，成功后 working image 更新并写入已保存调整记录，可连续调整多个色块；
-9. 点击“生成实验反馈”后调用 `POST /analyze`，分析基于已保存调整记录与最新 region HSL 状态；
-10. 提供“实验导师”侧边栏 UI 占位，当前版本不接入 HiAgent；
-11. `/recolor` 与前端实时预览均改为 binary mask（阈值 >127）直接修改选区像素 H/S/L，非选区完全不变，不再使用 soft mask alpha blend 蒙版混合。
-12. 点击“保存该色块调整”时，前端会将 `static/...` 或 `/static/...` 路径转换为完整 URL 后再调用 `POST /recolor`；
-13. 保存成功后会生成新的 working image，并继续作为下一次调色输入，实现多色块连续调整；
-14. H/S/L 三条滑杆使用颜色渐变轨道分别表达色相、饱和度、明度语义；
-15. 这种方式更适合教学实验，可直接观察选中色块 H/S/L 的相对变化；当前仍是颜色聚类近似实验，不是 Photoshop 级精修。
-16. 若 Render 服务重启/重新部署，临时上传文件与识别结果可能失效，需要重新上传并识别图片。
-
-### 本地访问
-
-启动服务后访问：
-
-- `http://127.0.0.1:8000/experiment`
-
-### Render 访问
-
-将域名替换为你的 Render 服务域名：
-
-- `https://<你的-render-域名>/experiment`
-
-
-## HiAgent 实验导师反馈
-
-- `/experiment` 页面“生成实验反馈”默认调用后端 `/hiagent-feedback`，由 HiAgent 生成最终实验反馈。
-- 后端通过 `/hiagent-feedback -> create_conversation -> chat_query_v2`（`ResponseMode=blocking`）代理调用 HiAgent；为兼容学校部署版本，后端会在请求 header 与 body 中同时传递 `AppID`。
-- 需要配置环境变量：`HIAGENT_API_BASE`、`HIAGENT_API_KEY`、`HIAGENT_APP_ID`、`HIAGENT_USER_ID`。
-- 临时诊断接口 `GET /hiagent-health-test`：用于确认 Render 后端是否能访问 HiAgent 的 `create_conversation`，不会暴露 API Key。
-- 网页实验台继续负责图像处理、binary mask 直接 HSL 调色、H/S/L 滑杆与保存。
-- HiAgent 负责色彩关系、视觉感受、适用场景、画面变化解释等导师分析。
+- 新增 `/vision-analyze`
+- 接入视觉大模型
+- 将分析结果卡片化展示在前台
+- 优化设计学院作品级 UI
