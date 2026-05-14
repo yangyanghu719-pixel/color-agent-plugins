@@ -120,7 +120,7 @@ def test_analyze_full_fields_and_ai_explanation():
     body = resp.json()
 
     required_fields = {
-        "status", "message", "tags", "color_relation", "visual_feeling", "suitable_scenario",
+        "status", "message", "analysis_type", "tags", "color_relation", "visual_feeling", "suitable_scenario",
         "summary", "ai_explanation", "risk", "next_step"
     }
     assert required_fields.issubset(set(body.keys()))
@@ -286,5 +286,4 @@ def test_recolor_preview_size_matches_processed_original(tmp_path):
     processed = Image.open(Path(seg["processed_image_url"].replace("/static/", "static/")))
     preview = Image.open(Path(resp["preview_image_url"].replace("/static/", "static/")))
     assert processed.size == preview.size
-
 

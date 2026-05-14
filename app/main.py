@@ -72,6 +72,10 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
     return {
         "status": "success",
         "message": "图片上传成功",
+        # canonical URL fields
+        "original_image_url": str(save_path),
+        "original_image_display_url": display_url,
+        # backward-compatible fields
         "image_url": str(save_path),
         "display_url": display_url,
     }

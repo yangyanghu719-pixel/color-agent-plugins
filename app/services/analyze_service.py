@@ -153,7 +153,8 @@ class AnalyzeService:
 
         return {
             "status": "success",
-            "message": "Rule-based comparative analysis generated",
+            "message": "Rule-based color analysis generated from provided region data (not image understanding).",
+            "analysis_type": "rule-based",
             "tags": tags,
             "color_relation": color_relation,
             "visual_feeling": visual_feeling,
