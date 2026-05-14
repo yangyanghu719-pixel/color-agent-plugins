@@ -41,6 +41,7 @@ class RecolorResponse(BaseModel):
 class AnalyzeResponse(BaseModel):
     status: str
     message: str
+    analysis_type: str
     tags: List[str] = Field(default_factory=list)
     color_relation: str
     visual_feeling: str
