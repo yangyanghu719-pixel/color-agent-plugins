@@ -56,6 +56,6 @@ class RecolorRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     original_color_regions: List[ColorRegionModel]
     adjusted_color_regions: List[ColorRegionModel]
-    before_image_url: HttpUrl
-    after_image_url: HttpUrl
+    before_image_url: str
+    after_image_url: str
     user_goal: Optional[str] = None

@@ -60,3 +60,10 @@ pytest -q
 - 接入视觉大模型
 - 将分析结果卡片化展示在前台
 - 优化设计学院作品级 UI
+
+
+## Analyze 接口升级（图像分析主入口）
+- `/analyze` 现已升级为图像分析主入口：同时读取 before/after 图片与色块结构数据，调用 OpenAI-compatible 视觉模型生成结构化学习反馈。
+- 规则分析仍保留：作为模型提示辅助上下文，并在模型不可用时自动 fallback。
+- 关键环境变量：`VISION_MODEL_PROVIDER`（默认 `openai_compatible`）、`VISION_MODEL_API_KEY`、`VISION_MODEL_NAME`、`VISION_MODEL_BASE_URL`。
+- 未配置 `VISION_MODEL_API_KEY` 时，接口会自动返回规则分析 fallback 结果（`fallback_used=true`）。

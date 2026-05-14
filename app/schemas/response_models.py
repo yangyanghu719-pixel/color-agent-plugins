@@ -41,12 +41,16 @@ class RecolorResponse(BaseModel):
 class AnalyzeResponse(BaseModel):
     status: str
     message: str
-    analysis_type: str
-    tags: List[str] = Field(default_factory=list)
-    color_relation: str
-    visual_feeling: str
-    suitable_scenario: str
-    summary: str
-    ai_explanation: str
-    risk: str
-    next_step: str
+    analysis_type: Optional[str] = None
+    summary: Optional[str] = ""
+    overall_impression: Optional[str] = ""
+    hue_analysis: Optional[str] = ""
+    saturation_analysis: Optional[str] = ""
+    lightness_analysis: Optional[str] = ""
+    color_relationship_analysis: Optional[str] = ""
+    visual_focus_analysis: Optional[str] = ""
+    emotional_expression: Optional[str] = ""
+    learning_explanation: Optional[str] = ""
+    suggestions: List[str] = Field(default_factory=list)
+    rule_based_tags: List[str] = Field(default_factory=list)
+    fallback_used: bool = False
