@@ -29,3 +29,10 @@
 
 ## GET /experiment
 教学实验台页面入口。
+
+
+### POST /analyze（图像分析主入口）
+- 输入：`before_image_url`、`after_image_url`、`original_color_regions`、`adjusted_color_regions`、`user_goal`。
+- 行为：后端读取前后图片（支持本地路径、`/static/...`、绝对 URL 的本地 path 解析），联合规则分析上下文调用视觉大模型。
+- 输出结构：`summary`、`overall_impression`、`hue_analysis`、`saturation_analysis`、`lightness_analysis`、`color_relationship_analysis`、`visual_focus_analysis`、`emotional_expression`、`learning_explanation`、`suggestions`、`rule_based_tags`、`fallback_used`。
+- 失败策略：模型调用失败自动 fallback；图片路径无效返回明确错误信息。

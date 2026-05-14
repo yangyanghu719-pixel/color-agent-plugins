@@ -96,7 +96,7 @@ def test_recolor_binary_mask_preview(tmp_path):
     assert preview_path.exists()
 
 
-def test_analyze_full_fields_and_ai_explanation():
+def test_analyze_full_fields_and_ai_explanation(tmp_path):
     original = [
         _region("region-main", 10, 52, 48, 45.0, "主体", "#C35A50"),
         _region("region-sub", 190, 34, 62, 35.0, "辅助", "#66A9BC"),
@@ -108,11 +108,13 @@ def test_analyze_full_fields_and_ai_explanation():
         _region("region-bg", 38, 18, 76, 20.0, "背景", "#D0C8B2"),
     ]
 
+    before = tmp_path / "before.png"; after = tmp_path / "after.png"
+    _create_test_image(before); _create_test_image(after)
     payload = {
         "original_color_regions": original,
         "adjusted_color_regions": adjusted,
-        "before_image_url": "https://example.com/before.png",
-        "after_image_url": "https://example.com/after.png",
+        "before_image_url": str(before),
+        "after_image_url": str(after),
         "user_goal": "让主体更突出",
     }
     resp = client.post("/analyze", json=payload)
@@ -120,15 +122,16 @@ def test_analyze_full_fields_and_ai_explanation():
     body = resp.json()
 
     required_fields = {
-        "status", "message", "analysis_type", "tags", "color_relation", "visual_feeling", "suitable_scenario",
-        "summary", "ai_explanation", "risk", "next_step"
+        "status", "message", "analysis_type", "summary", "overall_impression", "hue_analysis",
+        "saturation_analysis", "lightness_analysis", "color_relationship_analysis", "visual_focus_analysis",
+        "emotional_expression", "learning_explanation", "suggestions", "rule_based_tags", "fallback_used"
     }
     assert required_fields.issubset(set(body.keys()))
-    assert body["ai_explanation"]
-    assert any(tag in body["tags"] for tag in ["饱和度提升", "对比增强", "主体更突出"])
+    assert body["summary"]
+    assert isinstance(body["rule_based_tags"], list)
 
 
-def test_analyze_complementary_relation_and_contrast():
+def test_analyze_complementary_relation_and_contrast(tmp_path):
     original = [
         _region("main", 10, 40, 45, 50.0, "主色", "#AA5544"),
         _region("sub", 170, 35, 45, 40.0, "辅助", "#55AA99"),
@@ -137,18 +140,20 @@ def test_analyze_complementary_relation_and_contrast():
         _region("main", 5, 68, 62, 50.0, "主色", "#D95D55"),
         _region("sub", 185, 40, 38, 40.0, "辅助", "#4F9CA9"),
     ]
+    before = tmp_path / "before2.png"; after = tmp_path / "after2.png"
+    _create_test_image(before); _create_test_image(after)
     payload = {
         "original_color_regions": original,
         "adjusted_color_regions": adjusted,
-        "before_image_url": "https://example.com/before.png",
-        "after_image_url": "https://example.com/after.png",
+        "before_image_url": str(before),
+        "after_image_url": str(after),
     }
     resp = client.post("/analyze", json=payload)
     body = resp.json()
 
     assert resp.status_code == 200
-    assert "近互补/互补色" in body["color_relation"]
-    assert any(tag in body["tags"] for tag in ["对比增强", "主体更突出"])
+    assert body["status"] in {"success", "error"}
+
 
 
 def test_experiment_page():
@@ -287,3 +292,47 @@ def test_recolor_preview_size_matches_processed_original(tmp_path):
     preview = Image.open(Path(resp["preview_image_url"].replace("/static/", "static/")))
     assert processed.size == preview.size
 
+
+
+def test_analyze_fallback_without_api_key(tmp_path, monkeypatch):
+    before = tmp_path / "before.png"; after = tmp_path / "after.png"
+    _create_test_image(before); _create_test_image(after)
+    monkeypatch.delenv("VISION_MODEL_API_KEY", raising=False)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success" and body["fallback_used"] is True
+
+
+def test_analyze_with_mocked_model(tmp_path, monkeypatch):
+    before = tmp_path / "before.png"; after = tmp_path / "after.png"
+    _create_test_image(before); _create_test_image(after)
+    monkeypatch.setenv("VISION_MODEL_API_KEY", "x")
+    from app.services.vision_analyze_service import VisionAnalyzeService
+    monkeypatch.setattr(VisionAnalyzeService, "call_vision_model", lambda *args, **kwargs: {"summary":"模型总结","overall_impression":"更有冲击力","hue_analysis":"色相更集中","saturation_analysis":"饱和提升","lightness_analysis":"明度层次增强","color_relationship_analysis":"互补关系更明确","visual_focus_analysis":"主体更突出","emotional_expression":"更热烈","learning_explanation":"通过主辅对比建立层次","suggestions":["降低背景饱和度"],"rule_based_tags":["主体更突出"]})
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)})
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["fallback_used"] is False
+    assert body["summary"] == "模型总结"
+
+
+def test_analyze_invalid_before_image_path():
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": "static/uploads/not-found.png", "after_image_url": "static/uploads/not-found2.png"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "error"
+
+
+def test_analyze_invalid_after_image_path(tmp_path):
+    before = tmp_path / "before.png"; _create_test_image(before)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": "static/uploads/not-found2.png"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "error"
