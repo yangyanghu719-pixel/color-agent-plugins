@@ -338,7 +338,7 @@ def test_analyze_rejects_path_traversal(tmp_path):
     assert "path traversal" in resp.json()["message"]
 
 
-def test_analyze_accepts_static_path(tmp_path):
+def test_analyze_missing_static_path_returns_error(tmp_path):
     before = tmp_path / "before.png"; _create_test_image(before)
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
     adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
@@ -356,9 +356,51 @@ def test_analyze_invalid_after_image_path(tmp_path):
     assert resp.json()["status"] == "error"
 
 
+def test_analyze_rejects_remote_http_image_url(tmp_path):
+    before = tmp_path / "before.png"; _create_test_image(before)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": "https://example.com/assets/before.png", "after_image_url": str(before)})
+    assert resp.status_code == 200
+    assert "only this service static URL path" in resp.json()["message"]
+
+
 def test_experiment_not_use_legacy_analysis_fields():
     resp = client.get('/experiment')
     assert resp.status_code == 200
     assert 'visual_feeling' not in resp.text
     assert 'ai_explanation' not in resp.text
     assert 'next_step' not in resp.text
+
+
+def test_analyze_accepts_static_path_and_fallback(monkeypatch):
+    test_dir = Path("static/outputs/test-analyze-runtime")
+    test_dir.mkdir(parents=True, exist_ok=True)
+    before = test_dir / "before.png"
+    after = test_dir / "after.png"
+    _create_test_image(before)
+    _create_test_image(after)
+    monkeypatch.delenv("VISION_MODEL_API_KEY", raising=False)
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
+    try:
+        resp = client.post(
+            "/analyze",
+            json={
+                "original_color_regions": original,
+                "adjusted_color_regions": adjusted,
+                "before_image_url": "/static/outputs/test-analyze-runtime/before.png",
+                "after_image_url": "/static/outputs/test-analyze-runtime/after.png",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "success"
+        assert body["fallback_used"] is True
+    finally:
+        if before.exists():
+            before.unlink()
+        if after.exists():
+            after.unlink()
+        if test_dir.exists():
+            test_dir.rmdir()

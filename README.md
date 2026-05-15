@@ -71,7 +71,7 @@ pytest -q
 
 ## 中文视觉模型配置（/analyze）
 
-`/analyze` 使用 **OpenAI-compatible** 的 `/chat/completions` 接口接入视觉模型，支持通过环境变量配置：
+`/analyze` 使用 **OpenAI-compatible** 的 `/chat/completions` 接口接入中文视觉模型，可通过环境变量配置：
 
 ```bash
 VISION_MODEL_PROVIDER=openai_compatible
@@ -82,9 +82,8 @@ VISION_MODEL_NAME=
 
 说明：
 - `VISION_MODEL_PROVIDER` 当前固定为 `openai_compatible`。
-- `VISION_MODEL_API_KEY` 未配置时，系统会自动回退到本地规则分析（`fallback_used=true`）。
-- `VISION_MODEL_NAME` 与 `VISION_MODEL_BASE_URL` 需要按你所用平台控制台配置。
-- 可接入模型示例：Qwen-VL、Qwen3-VL-Flash、Qwen-VL-Plus、豆包视觉模型等（以平台实际可用名称为准）。
-- **不要把 API key 写入仓库。**
+- `VISION_MODEL_NAME` 与 `VISION_MODEL_BASE_URL` 以各平台控制台配置为准。
+- 可接入示例：Qwen-VL、Qwen3-VL-Flash、Qwen-VL-Plus、豆包视觉模型等（以平台实际可用名称为准）。
+- 未配置 `VISION_MODEL_API_KEY` 时，系统会自动回退到本地规则分析（`fallback_used=true`）。
 
-> 重要：色相/饱和度/明度等色彩数值分析由本地算法完成；视觉模型负责中文教学解释、学习反馈与建议生成。
+> 色彩数值分析（色相/饱和度/明度等）由本地算法完成；视觉模型主要负责中文教学解释与学习建议。
