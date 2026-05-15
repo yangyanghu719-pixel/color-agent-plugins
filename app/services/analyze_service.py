@@ -97,7 +97,7 @@ class AnalyzeService:
         return {
             "status": "success",
             "message": "Qwen enhanced analysis generated." if ai_text else "Rule-based analysis returned.",
-            "analysis_type": "rule-based+qwen" if ai_text else "rule-based",
+            "analysis_type": None,
             "summary": rule_result["summary"],
             "overall_impression": rule_result["visual_feeling"],
             "hue_analysis": rule_result["color_relation"],
@@ -107,6 +107,7 @@ class AnalyzeService:
             "visual_focus_analysis": rule_result["visual_feeling"],
             "emotional_expression": rule_result["suitable_scenario"],
             "learning_explanation": learning_text,
+            "model_markdown": learning_text if ai_text else None,
             "suggestions": [rule_result["next_step"], rule_result["risk"]],
             "rule_based_tags": list(rule_result["tags"]),
             "fallback_used": fallback_used,

@@ -125,7 +125,7 @@ def test_analyze_full_fields_and_ai_explanation(tmp_path):
     required_fields = {
         "status", "message", "analysis_type", "summary", "overall_impression", "hue_analysis",
         "saturation_analysis", "lightness_analysis", "color_relationship_analysis", "visual_focus_analysis",
-        "emotional_expression", "learning_explanation", "suggestions", "rule_based_tags", "fallback_used", "model_error"
+        "emotional_expression", "learning_explanation", "model_markdown", "suggestions", "rule_based_tags", "fallback_used", "model_error"
     }
     assert required_fields.issubset(set(body.keys()))
     assert body["summary"]
@@ -323,6 +323,7 @@ def test_analyze_with_mocked_model(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert body["fallback_used"] is False
     assert body["learning_explanation"] == "模型总结"
+    assert body["model_markdown"] == "模型总结"
     assert captured["before_image_path"] == str(before.resolve())
     assert captured["after_image_path"] == str(after.resolve())
 
@@ -450,7 +451,7 @@ def test_analyze_qwen_error_graceful_fallback(tmp_path, monkeypatch):
     body = resp.json()
     assert body["status"] == "success"
     assert body["fallback_used"] is True
-    assert body["analysis_type"] == "rule-based"
+    assert body["model_markdown"] is None
     assert body["model_error"] == "upstream failed"
 
 
