@@ -41,7 +41,11 @@ class VisionAnalyzeService:
     @staticmethod
     def _load_image_bytes(input_url: str) -> bytes:
         if VisionAnalyzeService._is_http_url(input_url):
-            raise ValueError("http(s) image URL is not supported for local analyze image loading")
+            parsed = urlparse(input_url)
+            if not parsed.path.startswith("/static/"):
+                raise ValueError(
+                    "remote http(s) image URL is not supported; only this service static URL path (/static/...) is allowed"
+                )
 
         local_path = VisionAnalyzeService._safe_local_path(input_url)
         if not local_path.exists():
@@ -101,12 +105,14 @@ class VisionAnalyzeService:
         if not model or not base_url:
             raise RuntimeError("VISION model config is incomplete")
 
-        user_content = messages[-1]["content"]
-        user_content.extend([
+        payload_messages = [dict(msg) for msg in messages]
+        payload_user_content = list(payload_messages[-1]["content"])
+        payload_user_content.extend([
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{images['before_b64']}"}},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{images['after_b64']}"}},
         ])
-        payload = {"model": model, "messages": messages, "response_format": {"type": "json_object"}}
+        payload_messages[-1]["content"] = payload_user_content
+        payload = {"model": model, "messages": payload_messages, "response_format": {"type": "json_object"}}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         with httpx.Client(timeout=45.0) as client:
             resp = client.post(f"{base_url.rstrip('/')}/chat/completions", json=payload, headers=headers)
