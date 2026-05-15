@@ -8,8 +8,17 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 
 logger = logging.getLogger(__name__)
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def image_to_data_url(image_path: str) -> str:
@@ -46,7 +55,7 @@ def analyze_color_with_qwen(
         "不要泛泛描述图片内容，要围绕色彩关系分析。\n"
         "不要编造用户没有提供的信息。\n"
         "语言要清楚、具体、中文，像设计课老师在讲解。\n\n"
-        f"结构化数据如下：\n{json.dumps({'color_regions': color_regions, 'hsl_change': hsl_change, 'rule_analysis': rule_analysis}, ensure_ascii=False)}"
+        f"结构化数据如下：\n{json.dumps({'color_regions': color_regions, 'hsl_change': hsl_change, 'rule_analysis': rule_analysis}, ensure_ascii=False, default=_json_default)}"
     )
 
     from openai import OpenAI
