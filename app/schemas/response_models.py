@@ -51,6 +51,7 @@ class AnalyzeResponse(BaseModel):
     visual_focus_analysis: Optional[str] = ""
     emotional_expression: Optional[str] = ""
     learning_explanation: Optional[str] = ""
+    model_markdown: Optional[str] = None
     suggestions: List[str] = Field(default_factory=list)
     rule_based_tags: List[str] = Field(default_factory=list)
     fallback_used: bool = False
