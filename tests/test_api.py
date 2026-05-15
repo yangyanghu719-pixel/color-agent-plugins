@@ -297,7 +297,7 @@ def test_recolor_preview_size_matches_processed_original(tmp_path):
 def test_analyze_fallback_without_api_key(tmp_path, monkeypatch):
     before = tmp_path / "before.png"; after = tmp_path / "after.png"
     _create_test_image(before); _create_test_image(after)
-    monkeypatch.delenv("VISION_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
     adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
     resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)})
@@ -309,16 +309,15 @@ def test_analyze_fallback_without_api_key(tmp_path, monkeypatch):
 def test_analyze_with_mocked_model(tmp_path, monkeypatch):
     before = tmp_path / "before.png"; after = tmp_path / "after.png"
     _create_test_image(before); _create_test_image(after)
-    monkeypatch.setenv("VISION_MODEL_API_KEY", "x")
-    from app.services.vision_analyze_service import VisionAnalyzeService
-    monkeypatch.setattr(VisionAnalyzeService, "call_vision_model", lambda *args, **kwargs: {"summary":"模型总结","overall_impression":"更有冲击力","hue_analysis":"色相更集中","saturation_analysis":"饱和提升","lightness_analysis":"明度层次增强","color_relationship_analysis":"互补关系更明确","visual_focus_analysis":"主体更突出","emotional_expression":"更热烈","learning_explanation":"通过主辅对比建立层次","suggestions":["降低背景饱和度"],"rule_based_tags":["主体更突出"]})
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "x")
+    monkeypatch.setattr("app.services.analyze_service.analyze_color_with_qwen", lambda *args, **kwargs: "模型总结")
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
     adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
     resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)})
     body = resp.json()
     assert resp.status_code == 200
     assert body["fallback_used"] is False
-    assert body["summary"] == "模型总结"
+    assert body["learning_explanation"] == "模型总结"
 
 
 def test_analyze_invalid_before_image_path():
@@ -380,7 +379,7 @@ def test_analyze_accepts_static_path_and_fallback(monkeypatch):
     after = test_dir / "after.png"
     _create_test_image(before)
     _create_test_image(after)
-    monkeypatch.delenv("VISION_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
     adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
     try:
@@ -404,3 +403,44 @@ def test_analyze_accepts_static_path_and_fallback(monkeypatch):
             after.unlink()
         if test_dir.exists():
             test_dir.rmdir()
+
+
+def test_analyze_without_dashscope_key_fallback(tmp_path, monkeypatch):
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    original = [_region("main", 10, 40, 45, 50.0, "主色", "#AA5544")]
+    adjusted = [_region("main", 14, 55, 52, 50.0, "主色", "#CC6655")]
+    before = tmp_path / "before3.png"
+    after = tmp_path / "after3.png"
+    _create_test_image(before)
+    _create_test_image(after)
+    payload = {"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)}
+    resp = client.post("/analyze", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["fallback_used"] is True
+    assert body["learning_explanation"]
+
+
+def test_analyze_qwen_error_graceful_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-key")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("upstream failed")
+
+    monkeypatch.setattr("app.services.analyze_service.analyze_color_with_qwen", _boom)
+
+    original = [_region("main", 10, 40, 45, 50.0, "主色", "#AA5544")]
+    adjusted = [_region("main", 12, 60, 57, 50.0, "主色", "#CC6655")]
+    before = tmp_path / "before4.png"
+    after = tmp_path / "after4.png"
+    _create_test_image(before)
+    _create_test_image(after)
+
+    payload = {"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)}
+    resp = client.post("/analyze", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["fallback_used"] is True
+    assert body["analysis_type"] == "rule-based"
