@@ -87,3 +87,12 @@ VISION_MODEL_NAME=
 - 未配置 `VISION_MODEL_API_KEY` 时，系统会自动回退到本地规则分析（`fallback_used=true`）。
 
 > 色彩数值分析（色相/饱和度/明度等）由本地算法完成；视觉模型主要负责中文教学解释与学习建议。
+
+
+## 阿里云百炼 Qwen 配置（/analyze）
+
+- 当前 `/analyze` 会先执行规则引擎分析，再尝试用 **qwen3.5-flash** 生成中文教学风格增强说明（`learning_explanation`）。
+- 环境变量必须配置：`DASHSCOPE_API_KEY`。
+- 使用的 OpenAI 兼容端点：`https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- 说明：该 `base_url` 是 API 地址，不是网页；浏览器直接打开显示 `Not Found` 属于正常现象。
+- 若未配置 `DASHSCOPE_API_KEY` 或模型调用失败，接口会自动降级为纯规则分析结果，不影响 `/analyze` 成功返回。
