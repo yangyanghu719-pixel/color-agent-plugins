@@ -62,7 +62,7 @@ def analyze_color_with_qwen(
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=api_key, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+    client = OpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
     completion = client.chat.completions.create(
         model="qwen3.5-flash",
         messages=[
