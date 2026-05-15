@@ -74,6 +74,6 @@ pytest -q
 
 - 当前 `/analyze` 会先执行规则引擎分析，再尝试用 **qwen3.5-flash** 生成中文教学风格增强说明（`learning_explanation`）。
 - Render 当前仅需配置：`DASHSCOPE_API_KEY`。
-- 使用的 OpenAI 兼容端点：`https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- 使用的 OpenAI 兼容端点：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
 - 说明：该 `base_url` 是 API 地址，不是网页；浏览器直接打开显示 `Not Found` 属于正常现象。
 - 若未配置 `DASHSCOPE_API_KEY` 或模型调用失败，接口会自动降级为纯规则分析结果，不影响 `/analyze` 成功返回。
