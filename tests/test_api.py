@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app.main import app
+from app.utils.color_analysis import compare_color_regions
 
 client = TestClient(app)
 
@@ -124,7 +125,7 @@ def test_analyze_full_fields_and_ai_explanation(tmp_path):
     required_fields = {
         "status", "message", "analysis_type", "summary", "overall_impression", "hue_analysis",
         "saturation_analysis", "lightness_analysis", "color_relationship_analysis", "visual_focus_analysis",
-        "emotional_expression", "learning_explanation", "suggestions", "rule_based_tags", "fallback_used"
+        "emotional_expression", "learning_explanation", "suggestions", "rule_based_tags", "fallback_used", "model_error"
     }
     assert required_fields.issubset(set(body.keys()))
     assert body["summary"]
@@ -310,7 +311,11 @@ def test_analyze_with_mocked_model(tmp_path, monkeypatch):
     before = tmp_path / "before.png"; after = tmp_path / "after.png"
     _create_test_image(before); _create_test_image(after)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "x")
-    monkeypatch.setattr("app.services.analyze_service.analyze_color_with_qwen", lambda *args, **kwargs: "模型总结")
+    captured = {}
+    def _mock_qwen(*args, **kwargs):
+        captured.update(kwargs)
+        return "模型总结"
+    monkeypatch.setattr("app.services.analyze_service.analyze_color_with_qwen", _mock_qwen)
     original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533"), _region("r2", 180, 30, 60, 40.0, "辅助", "#55AABB")]
     adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644"), _region("r2", 175, 35, 58, 40.0, "辅助", "#5599BB")]
     resp = client.post("/analyze", json={"original_color_regions": original, "adjusted_color_regions": adjusted, "before_image_url": str(before), "after_image_url": str(after)})
@@ -318,6 +323,8 @@ def test_analyze_with_mocked_model(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert body["fallback_used"] is False
     assert body["learning_explanation"] == "模型总结"
+    assert captured["before_image_path"] == str(before.resolve())
+    assert captured["after_image_path"] == str(after.resolve())
 
 
 def test_analyze_invalid_before_image_path():
@@ -444,3 +451,15 @@ def test_analyze_qwen_error_graceful_fallback(tmp_path, monkeypatch):
     assert body["status"] == "success"
     assert body["fallback_used"] is True
     assert body["analysis_type"] == "rule-based"
+    assert body["model_error"] == "upstream failed"
+
+
+def test_compare_color_regions_hsl_is_dict():
+    original = [_region("r1", 20, 40, 40, 60.0, "主色", "#AA5533")]
+    adjusted = [_region("r1", 30, 50, 45, 60.0, "主色", "#BB6644")]
+    from app.schemas.request_models import ColorRegionModel
+    o = [ColorRegionModel(**x) for x in original]
+    a = [ColorRegionModel(**x) for x in adjusted]
+    changes, _ = compare_color_regions(o, a)
+    assert isinstance(changes[0]["before_hsl"], dict)
+    assert isinstance(changes[0]["after_hsl"], dict)
