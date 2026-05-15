@@ -36,6 +36,9 @@ def classify_contrast_level(
 
 
 def compare_color_regions(original_regions: List, adjusted_regions: List) -> Tuple[List[Dict], List[Dict]]:
+    def _to_dict(hsl: object) -> object:
+        return hsl.model_dump() if hasattr(hsl, "model_dump") else hsl
+
     original_map = {region.id: region for region in original_regions}
     adjusted_map = {region.id: region for region in adjusted_regions}
 
@@ -60,8 +63,8 @@ def compare_color_regions(original_regions: List, adjusted_regions: List) -> Tup
             "hex_after": after.hex,
             "percentage": before.percentage,
             "role": before.role,
-            "before_hsl": before.hsl,
-            "after_hsl": after.hsl,
+            "before_hsl": _to_dict(before.hsl),
+            "after_hsl": _to_dict(after.hsl),
         }
         changes.append(item)
 

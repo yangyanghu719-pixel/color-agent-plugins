@@ -87,7 +87,12 @@ class AnalyzeService:
         }
 
     @staticmethod
-    def _build_response(rule_result: dict, ai_text: str | None = None, fallback_used: bool = False) -> dict:
+    def _build_response(
+        rule_result: dict,
+        ai_text: str | None = None,
+        fallback_used: bool = False,
+        model_error: str | None = None,
+    ) -> dict:
         learning_text = ai_text.strip() if ai_text else rule_result["ai_explanation"]
         return {
             "status": "success",
@@ -105,6 +110,7 @@ class AnalyzeService:
             "suggestions": [rule_result["next_step"], rule_result["risk"]],
             "rule_based_tags": list(rule_result["tags"]),
             "fallback_used": fallback_used,
+            "model_error": model_error,
         }
 
     @staticmethod
@@ -116,10 +122,11 @@ class AnalyzeService:
             "changes": rule_result.get("changes", []),
         }
         try:
-            AnalyzeService._resolve_local_image_path(payload.before_image_url)
-            image_path = AnalyzeService._resolve_local_image_path(payload.after_image_url)
+            before_image_path = AnalyzeService._resolve_local_image_path(payload.before_image_url)
+            after_image_path = AnalyzeService._resolve_local_image_path(payload.after_image_url)
             ai_explanation = analyze_color_with_qwen(
-                image_path=image_path,
+                before_image_path=before_image_path,
+                after_image_path=after_image_path,
                 color_regions=[r.model_dump() for r in payload.adjusted_color_regions],
                 hsl_change=hsl_change,
                 rule_analysis=rule_result,
@@ -129,4 +136,4 @@ class AnalyzeService:
             return {"status": "error", "message": str(exc)}
         except Exception as exc:
             logger.warning("Qwen analyze failed, fallback to rule-based result: %s", exc)
-            return AnalyzeService._build_response(rule_result, None, fallback_used=True)
+            return AnalyzeService._build_response(rule_result, None, fallback_used=True, model_error=str(exc))

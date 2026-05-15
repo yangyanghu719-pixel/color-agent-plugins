@@ -54,3 +54,4 @@ class AnalyzeResponse(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
     rule_based_tags: List[str] = Field(default_factory=list)
     fallback_used: bool = False
+    model_error: Optional[str] = None

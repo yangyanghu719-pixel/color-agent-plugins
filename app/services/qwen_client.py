@@ -33,7 +33,8 @@ def image_to_data_url(image_path: str) -> str:
 
 
 def analyze_color_with_qwen(
-    image_path: str,
+    before_image_path: str,
+    after_image_path: str,
     color_regions: list[dict[str, Any]],
     hsl_change: dict[str, Any],
     rule_analysis: dict[str, Any],
@@ -42,7 +43,8 @@ def analyze_color_with_qwen(
     if not api_key:
         raise RuntimeError("DASHSCOPE_API_KEY is not configured")
 
-    image_data_url = image_to_data_url(image_path)
+    before_image_data_url = image_to_data_url(before_image_path)
+    after_image_data_url = image_to_data_url(after_image_path)
     prompt = (
         "你是一个中文色彩设计教学助手。请基于图片和结构化数据，生成面向设计学生的色彩分析。\n"
         "重点分析：\n"
@@ -67,8 +69,10 @@ def analyze_color_with_qwen(
             {
                 "role": "user",
                 "content": [
+                    {"type": "text", "text": "第一张图片是调色前图片，第二张图片是调色后图片。请结合两张图做对比分析。"},
+                    {"type": "image_url", "image_url": {"url": before_image_data_url}},
+                    {"type": "image_url", "image_url": {"url": after_image_data_url}},
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_data_url}},
                 ],
             }
         ],

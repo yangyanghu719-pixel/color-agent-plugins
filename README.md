@@ -63,28 +63,9 @@ pytest -q
 
 
 ## Analyze 接口升级（图像分析主入口）
-- `/analyze` 现已升级为图像分析主入口：同时读取 before/after 图片与色块结构数据，调用 OpenAI-compatible 视觉模型生成结构化学习反馈。
+- `/analyze` 现已升级为图像分析主入口：同时读取 before/after 图片与色块结构数据，调用 Qwen 生成结构化学习反馈。
 - 规则分析仍保留：作为模型提示辅助上下文，并在模型不可用时自动 fallback。
-- 关键环境变量：`VISION_MODEL_PROVIDER`（默认 `openai_compatible`）、`VISION_MODEL_API_KEY`、`VISION_MODEL_NAME`、`VISION_MODEL_BASE_URL`。
-- 未配置 `VISION_MODEL_API_KEY` 时，接口会自动返回规则分析 fallback 结果（`fallback_used=true`）。
-
-
-## 中文视觉模型配置（/analyze）
-
-`/analyze` 使用 **OpenAI-compatible** 的 `/chat/completions` 接口接入中文视觉模型，可通过环境变量配置：
-
-```bash
-VISION_MODEL_PROVIDER=openai_compatible
-VISION_MODEL_API_KEY=
-VISION_MODEL_BASE_URL=
-VISION_MODEL_NAME=
-```
-
-说明：
-- `VISION_MODEL_PROVIDER` 当前固定为 `openai_compatible`。
-- `VISION_MODEL_NAME` 与 `VISION_MODEL_BASE_URL` 以各平台控制台配置为准。
-- 可接入示例：Qwen-VL、Qwen3-VL-Flash、Qwen-VL-Plus、豆包视觉模型等（以平台实际可用名称为准）。
-- 未配置 `VISION_MODEL_API_KEY` 时，系统会自动回退到本地规则分析（`fallback_used=true`）。
+- ⚠️ `VISION_MODEL_API_KEY`、`VISION_MODEL_BASE_URL`、`VISION_MODEL_NAME` 仅为历史方案，当前 `/analyze` 不再依赖。
 
 > 色彩数值分析（色相/饱和度/明度等）由本地算法完成；视觉模型主要负责中文教学解释与学习建议。
 
@@ -92,7 +73,7 @@ VISION_MODEL_NAME=
 ## 阿里云百炼 Qwen 配置（/analyze）
 
 - 当前 `/analyze` 会先执行规则引擎分析，再尝试用 **qwen3.5-flash** 生成中文教学风格增强说明（`learning_explanation`）。
-- 环境变量必须配置：`DASHSCOPE_API_KEY`。
+- Render 当前仅需配置：`DASHSCOPE_API_KEY`。
 - 使用的 OpenAI 兼容端点：`https://dashscope.aliyuncs.com/compatible-mode/v1`。
 - 说明：该 `base_url` 是 API 地址，不是网页；浏览器直接打开显示 `Not Found` 属于正常现象。
 - 若未配置 `DASHSCOPE_API_KEY` 或模型调用失败，接口会自动降级为纯规则分析结果，不影响 `/analyze` 成功返回。
