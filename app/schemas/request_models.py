@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class HSLModel(BaseModel):
@@ -37,7 +37,7 @@ class SegmentRequest(BaseModel):
 
 class RecolorRequest(BaseModel):
     image_id: str
-    original_image_url: HttpUrl
+    original_image_url: str
     region_id: Optional[str] = None
     target_region_id: Optional[str] = None
     original_hsl: HSLModel
@@ -58,4 +58,56 @@ class AnalyzeRequest(BaseModel):
     adjusted_color_regions: List[ColorRegionModel]
     before_image_url: str
     after_image_url: str
+    user_goal: Optional[str] = None
+
+
+class LayerDecomposeRequest(BaseModel):
+    image_url: str
+    max_layers: int = Field(8, ge=1, le=16)
+
+
+class LayerTransformModel(BaseModel):
+    x: float
+    y: float
+    scale_x: float = 1
+    scale_y: float = 1
+    rotation: float = 0
+    flip_x: bool = False
+    flip_y: bool = False
+
+
+class LayerComposeLayerModel(BaseModel):
+    id: str
+    layer_url: str
+    x: float
+    y: float
+    scale_x: float = 1
+    scale_y: float = 1
+    rotation: float = 0
+    flip_x: bool = False
+    flip_y: bool = False
+    visible: bool = True
+    opacity: float = Field(1, ge=0, le=1)
+    z_index: int = 0
+
+
+class CompositionOperationModel(BaseModel):
+    type: str
+    layer_id: Optional[str] = None
+    description: str
+
+
+class LayerComposeRequest(BaseModel):
+    image_id: str
+    background_url: str
+    layers: List[LayerComposeLayerModel]
+    operations: List[CompositionOperationModel] = Field(default_factory=list)
+
+
+class CompositionAnalyzeRequest(BaseModel):
+    before_image_url: str
+    after_image_url: str
+    layers_before: List[dict[str, Any]] = Field(default_factory=list)
+    layers_after: List[dict[str, Any]] = Field(default_factory=list)
+    operations: List[CompositionOperationModel] = Field(default_factory=list)
     user_goal: Optional[str] = None

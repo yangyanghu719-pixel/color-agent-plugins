@@ -77,3 +77,11 @@ pytest -q
 - 使用的 OpenAI 兼容端点：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
 - 说明：该 `base_url` 是 API 地址，不是网页；浏览器直接打开显示 `Not Found` 属于正常现象。
 - 若未配置 `DASHSCOPE_API_KEY` 或模型调用失败，接口会自动降级为纯规则分析结果，不影响 `/analyze` 成功返回。
+
+## 色彩与形式构成实验台（升级）
+1. 上传作品
+2. 上传成功后选择实验方向：色彩实验 / 构图实验
+3. 色彩实验：提取主色区域、HSL 调整、生成色彩反馈
+4. 构图实验：提取画面元素图层、拖拽缩放旋转镜像、调整图层顺序、生成构图反馈
+
+> 构图实验第一阶段在无外部图层模型时使用 fallback 近似图层拆解（fallback_used=true），后续可接入 Qwen-Image-Layered、SAM、DesignEdit。
