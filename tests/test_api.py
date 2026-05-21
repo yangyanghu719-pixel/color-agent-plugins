@@ -161,19 +161,14 @@ def test_experiment_page():
     resp = client.get("/experiment")
     assert resp.status_code == 200
     for keyword in [
-        "色彩构成实验台",
-        "实验导师",
-        "上传原图",
-        "调整后整图实时预览",
-        "主色区域选择",
-        "H/S/L 调色面板",
-        "H 色相",
-        "S 饱和度",
-        "L 明度",
-        "保存该色块调整",
-        "已保存调整区域",
-        "生成实验反馈",
-        "请先选择一个主色区域",
+        "色彩与形式构成实验台",
+        "上传成功",
+        "请选择本次实验方向",
+        "色彩实验",
+        "构图实验",
+        "开始色彩实验",
+        "开始构图实验",
+        "生成构图反馈",
     ]:
         assert keyword in resp.text
 
@@ -464,3 +459,33 @@ def test_compare_color_regions_hsl_is_dict():
     changes, _ = compare_color_regions(o, a)
     assert isinstance(changes[0]["before_hsl"], dict)
     assert isinstance(changes[0]["after_hsl"], dict)
+
+def test_layers_decompose_and_compose(tmp_path):
+    image_path = tmp_path / 'layer-test.png'
+    _create_test_image(image_path)
+    d = client.post('/layers/decompose', json={'image_url': str(image_path), 'max_layers': 4})
+    assert d.status_code == 200
+    db = d.json()
+    assert db['status'] == 'success' and db['image_id'] and isinstance(db['layers'], list) and db['canvas']
+    assert 'fallback_used' in db
+    layers = db['layers']
+    c = client.post('/layers/compose', json={'image_id': db['image_id'], 'background_url': db['background_url'], 'layers': [{
+        'id': l['id'], 'layer_url': l['layer_url'], 'x': l['transform']['x'], 'y': l['transform']['y'], 'scale_x': 1, 'scale_y': 1,
+        'rotation': 0, 'flip_x': False, 'flip_y': False, 'visible': True, 'opacity': 1, 'z_index': i
+    } for i,l in enumerate(reversed(layers),1)], 'operations':[{'type':'bring_to_front','layer_id':layers[0]['id'],'description':'置于顶层'}]})
+    assert c.status_code == 200
+    cb = c.json()
+    assert cb['after_image_url'].startswith('/static/outputs/')
+
+
+def test_composition_analyze_fallback():
+    r = client.post('/composition/analyze', json={
+        'before_image_url': '/static/uploads/a.png',
+        'after_image_url': '/static/uploads/b.png',
+        'layers_before': [], 'layers_after': [],
+        'operations': [{'type':'send_to_back','layer_id':'layer-1','description':'下移'}],
+        'user_goal': '用于形式构成课程实验'
+    })
+    assert r.status_code == 200
+    b = r.json()
+    assert b['fallback_used'] is True

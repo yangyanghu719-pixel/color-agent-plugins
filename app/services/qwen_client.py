@@ -91,3 +91,30 @@ def analyze_color_with_qwen(
         raise RuntimeError("qwen returned empty content")
     logger.info("Qwen analysis generated successfully")
     return content.strip()
+
+
+def analyze_composition_with_qwen(before_image_url: str, after_image_url: str, layers_before: list, layers_after: list, operations: list, user_goal: str | None = None) -> str:
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        raise RuntimeError("DASHSCOPE_API_KEY is not configured")
+    prompt = """你是中文形式构成与构图课程助教。
+请只关注构图变化，不要主要分析色相/饱和度/明度。
+固定输出：
+### 总体判断
+### 构图变化
+### 图层与空间关系
+### 形式构成概念
+### 学习建议
+总字数400字以内。
+"""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    completion = client.chat.completions.create(
+        model="qwen3.5-flash",
+        messages=[{"role":"user","content": f"before={before_image_url} after={after_image_url} ops={json.dumps(operations,ensure_ascii=False)}\n{prompt}"}],
+        extra_body={"enable_thinking": False},
+    )
+    content = completion.choices[0].message.content
+    if not content:
+        raise RuntimeError("qwen returned empty content")
+    return content.strip()

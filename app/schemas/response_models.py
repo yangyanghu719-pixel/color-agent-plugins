@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.schemas.request_models import ColorRegionModel, HSLModel
+from app.schemas.request_models import ColorRegionModel, HSLModel, LayerTransformModel
 
 
 class HealthResponse(BaseModel):
@@ -54,5 +54,54 @@ class AnalyzeResponse(BaseModel):
     model_markdown: Optional[str] = None
     suggestions: List[str] = Field(default_factory=list)
     rule_based_tags: List[str] = Field(default_factory=list)
+    fallback_used: bool = False
+    model_error: Optional[str] = None
+
+
+class LayerModel(BaseModel):
+    id: str
+    name: str
+    layer_url: str
+    mask_url: str
+    bbox: dict
+    z_index: int
+    visible: bool = True
+    opacity: float = 1
+    transform: LayerTransformModel
+
+
+class LayerDecomposeResponse(BaseModel):
+    status: str
+    message: str
+    image_id: str
+    fallback_used: bool
+    original_image_url: str
+    canvas: dict
+    background_url: str
+    layers: List[LayerModel]
+
+
+class LayerComposeResponse(BaseModel):
+    status: str
+    message: str
+    after_image_url: str
+    composition_result_url: str
+    operations_summary: List[str] = Field(default_factory=list)
+
+
+class CompositionAnalyzeResponse(BaseModel):
+    status: str
+    message: str
+    summary: str = ""
+    composition_change: str = ""
+    visual_focus_analysis: str = ""
+    balance_analysis: str = ""
+    proportion_analysis: str = ""
+    direction_analysis: str = ""
+    blank_space_analysis: str = ""
+    layer_order_analysis: str = ""
+    spatial_relationship_analysis: str = ""
+    learning_explanation: str = ""
+    suggestions: List[str] = Field(default_factory=list)
     fallback_used: bool = False
     model_error: Optional[str] = None
