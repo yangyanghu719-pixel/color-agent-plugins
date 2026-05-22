@@ -60,10 +60,13 @@ class AnalyzeResponse(BaseModel):
 
 class LayerModel(BaseModel):
     id: str
+    object_id: Optional[str] = None
     name: str
+    label_en: Optional[str] = None
     layer_url: str
     mask_url: str
     bbox: dict
+    confidence: float = 0.9
     z_index: int
     visible: bool = True
     opacity: float = 1
