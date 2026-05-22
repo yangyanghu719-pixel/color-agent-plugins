@@ -552,3 +552,77 @@ def test_composition_analyze_qwen_uses_image_url_message(tmp_path, monkeypatch):
     body = client.post('/composition/analyze', json=payload).json()
     assert body.get('status') == 'success'
     assert called.get('before_image_url') == str(before)
+
+
+def test_layers_decompose_resizes_and_generates_cropped_layers(tmp_path):
+    image_path = tmp_path / "large-layer-test.png"
+    img = Image.new("RGB", (2400, 1800), "white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, 700, 900), fill=(220, 30, 30))
+    draw.rectangle((900, 300, 1600, 1200), fill=(30, 160, 220))
+    draw.rectangle((1700, 1000, 2300, 1700), fill=(50, 190, 80))
+    img.save(image_path)
+
+    resp = client.post("/layers/decompose", json={"image_url": str(image_path), "max_layers": 6})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["fallback_used"] is True
+    assert "近似图层拆解" in body["message"]
+
+    canvas_w = body["canvas"]["width"]
+    canvas_h = body["canvas"]["height"]
+    assert max(canvas_w, canvas_h) <= 1024
+    assert canvas_w * canvas_h <= 1024 * 1024
+
+    processed = Path(body["processed_original_url"].replace("/static/", "static/"))
+    assert processed.exists()
+
+    has_cropped_layer = False
+    for layer in body["layers"]:
+        layer_path = Path(layer["layer_url"].replace("/static/", "static/"))
+        assert layer_path.exists()
+        lw, lh = Image.open(layer_path).size
+        bbox = layer["bbox"]
+        assert lw <= bbox["width"]
+        assert lh <= bbox["height"]
+        if lw < canvas_w or lh < canvas_h:
+            has_cropped_layer = True
+    assert has_cropped_layer
+
+
+def test_layers_compose_with_cropped_layers(tmp_path):
+    image_path = tmp_path / "compose-layer-test.png"
+    _create_test_image(image_path)
+
+    decomp = client.post("/layers/decompose", json={"image_url": str(image_path), "max_layers": 4}).json()
+    assert decomp["status"] == "success"
+    assert decomp["layers"]
+
+    layer = decomp["layers"][0]
+    compose_payload = {
+        "image_id": decomp["image_id"],
+        "background_url": decomp["background_url"],
+        "layers": [{
+            "id": layer["id"],
+            "layer_url": layer["layer_url"],
+            "x": layer["bbox"]["x"],
+            "y": layer["bbox"]["y"],
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "rotation": 0,
+            "flip_x": False,
+            "flip_y": False,
+            "visible": True,
+            "opacity": 1.0,
+            "z_index": 1,
+        }],
+        "operations": [{"type": "place", "layer_id": layer["id"], "description": "place test layer"}],
+    }
+    composed = client.post("/layers/compose", json=compose_payload)
+    assert composed.status_code == 200
+    data = composed.json()
+    assert data["status"] == "success"
+    out = Path(data["after_image_url"].replace("/static/", "static/"))
+    assert out.exists()
+    assert Image.open(out).size == (decomp["canvas"]["width"], decomp["canvas"]["height"])
