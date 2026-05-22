@@ -114,3 +114,22 @@ class CompositionAnalyzeResponse(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
     fallback_used: bool = False
     model_error: Optional[str] = None
+
+
+class DetectedObjectModel(BaseModel):
+    id: str
+    name: str
+    label_en: Optional[str] = None
+    description: Optional[str] = None
+    confidence: Optional[float] = None
+    selected: bool = False
+
+
+class CompositionObjectsResponse(BaseModel):
+    status: str
+    message: str
+    image_id: Optional[str] = None
+    objects: List[DetectedObjectModel] = Field(default_factory=list)
+    model_used: Optional[str] = None
+    fallback_used: bool = False
+    model_error: Optional[str] = None

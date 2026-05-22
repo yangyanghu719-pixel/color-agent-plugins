@@ -107,12 +107,31 @@ class LayerComposeRequest(BaseModel):
 class CompositionAnalyzeRequest(BaseModel):
     before_image_url: str
     after_image_url: str
+    detected_objects: List[dict[str, Any]] = Field(default_factory=list)
+    selected_objects: List[dict[str, Any]] = Field(default_factory=list)
     layers_before: List[dict[str, Any]] = Field(default_factory=list)
     layers_after: List[dict[str, Any]] = Field(default_factory=list)
     operations: List[CompositionOperationModel] = Field(default_factory=list)
+    inpainting_used: Optional[bool] = None
     user_goal: Optional[str] = None
 
 
 class ManualExtractRequest(BaseModel):
     image_url: str
     bbox: dict[str, float]
+
+
+class CompositionObjectsRequest(BaseModel):
+    image_url: str
+
+
+class ExtractObjectModel(BaseModel):
+    id: str
+    name: str
+    label_en: Optional[str] = None
+
+
+class ExtractByObjectsRequest(BaseModel):
+    image_url: str
+    objects: List[ExtractObjectModel]
+    need_inpainting: bool = True

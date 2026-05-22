@@ -141,3 +141,50 @@ def analyze_composition_with_qwen(before_image_url: str, after_image_url: str, l
     if not content:
         raise RuntimeError("qwen returned empty content")
     return content.strip()
+
+
+def detect_objects_with_qwen(image_path: str) -> list[dict[str, Any]]:
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        raise RuntimeError("DASHSCOPE_API_KEY is not configured")
+    image_data_url = image_to_data_url(str(Path(image_path).resolve()))
+    prompt = """你是构图学习工具中的图像对象识别模块。
+请识别画面中适合作为“构图元素图层”的主要对象。
+不要输出颜色区域。
+不要输出抽象的灰色区域、白色区域、暗部区域。
+只输出真实物体、场景元素或视觉上可被移动的主体。
+输出 JSON，不要输出 Markdown。
+
+JSON 格式：
+{
+  "objects": [
+    {
+      "name": "猫",
+      "label_en": "cat",
+      "description": "画面右下方的猫",
+      "confidence": 0.91
+    }
+  ]
+}
+
+限制：
+- 最多输出 8 个对象
+- 优先输出主体、前景物、家具、人物、动物、文字块、装饰元素
+- 不要输出过细碎的小物件
+- 不要输出颜色名
+"""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    completion = client.chat.completions.create(
+        model="qwen3.5-flash",
+        messages=[{"role":"user","content":[
+            {"type":"text","text":prompt},
+            {"type":"image_url","image_url":{"url":image_data_url}}
+        ]}],
+        response_format={"type": "json_object"},
+        extra_body={"enable_thinking": False},
+    )
+    content = completion.choices[0].message.content or "{}"
+    data = json.loads(content)
+    objects = data.get("objects", [])
+    return [o for o in objects if isinstance(o, dict)][:8]

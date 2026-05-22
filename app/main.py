@@ -5,8 +5,8 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.schemas.request_models import AnalyzeRequest, CompositionAnalyzeRequest, LayerComposeRequest, LayerDecomposeRequest, ManualExtractRequest, RecolorRequest, SegmentRequest
-from app.schemas.response_models import AnalyzeResponse, CompositionAnalyzeResponse, HealthResponse, LayerComposeResponse, LayerDecomposeResponse, RecolorResponse, SegmentResponse
+from app.schemas.request_models import AnalyzeRequest, CompositionAnalyzeRequest, CompositionObjectsRequest, ExtractByObjectsRequest, LayerComposeRequest, LayerDecomposeRequest, ManualExtractRequest, RecolorRequest, SegmentRequest
+from app.schemas.response_models import AnalyzeResponse, CompositionAnalyzeResponse, CompositionObjectsResponse, HealthResponse, LayerComposeResponse, LayerDecomposeResponse, RecolorResponse, SegmentResponse
 from app.services.analyze_service import AnalyzeService
 from app.services.composition_analyze_service import CompositionAnalyzeService
 from app.services.layer_service import LayerService
@@ -25,6 +25,10 @@ def segment(payload: SegmentRequest): return SegmentService.segment_colors(paylo
 def recolor(payload: RecolorRequest): return RecolorService.recolor(payload)
 @app.post('/analyze', response_model=AnalyzeResponse)
 def analyze(payload: AnalyzeRequest): return AnalyzeService.analyze(payload)
+@app.post('/composition/objects', response_model=CompositionObjectsResponse)
+def composition_objects(payload: CompositionObjectsRequest): return LayerService.detect_composition_objects(payload.image_url)
+@app.post('/layers/extract-by-objects', response_model=LayerDecomposeResponse)
+def extract_by_objects(payload: ExtractByObjectsRequest): return LayerService.extract_by_objects(payload.image_url, [o.model_dump() for o in payload.objects], payload.need_inpainting)
 @app.post('/layers/decompose', response_model=LayerDecomposeResponse)
 def layer_decompose(payload: LayerDecomposeRequest): return LayerService.decompose(payload.image_url, payload.max_layers)
 @app.post('/layers/manual-extract', response_model=LayerDecomposeResponse)
