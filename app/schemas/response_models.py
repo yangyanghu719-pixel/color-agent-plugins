@@ -63,9 +63,11 @@ class LayerModel(BaseModel):
     object_id: Optional[str] = None
     name: str
     label_en: Optional[str] = None
+    prompt: Optional[str] = None
     layer_url: str
     mask_url: str
     bbox: dict
+    coverage: Optional[float] = None
     confidence: float = 0.9
     z_index: int
     visible: bool = True
@@ -89,6 +91,8 @@ class LayerDecomposeResponse(BaseModel):
     canvas: dict
     background_url: Optional[str] = None
     layers: List[LayerModel] = Field(default_factory=list)
+    warning: Optional[str] = None
+    segmentation_debug: Optional[dict] = None
 
 
 class LayerComposeResponse(BaseModel):

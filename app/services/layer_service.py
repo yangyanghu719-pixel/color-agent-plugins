@@ -82,6 +82,13 @@ class LayerService:
         return {"x": int(x0), "y": int(y0), "width": int(max(1, x1 - x0)), "height": int(max(1, y1 - y0))}
 
     @staticmethod
+    def _mask_coverage(mask: Image.Image) -> float:
+        m = mask.convert("L")
+        white = sum(1 for p in m.getdata() if p > 0)
+        total = m.width * m.height
+        return (white / total) if total else 0.0
+
+    @staticmethod
     def extract_by_objects(image_url: str, objects: list[dict], need_inpainting: bool = True) -> dict:
         img, image_id, out, processed_original_url = LayerService._prepare_image(image_url)
         provider = os.getenv("OBJECT_SEGMENT_PROVIDER", "none").strip().lower()
@@ -96,11 +103,32 @@ class LayerService:
             return {"status":"error","message":f"Replicate grounded_sam 调用失败：{e}","image_id":image_id,"fallback_used":True,"segmentation_method":"replicate_grounded_sam","inpainting_used":False,"inpainting_fallback_used":True,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":processed_original_url,"background_url":processed_original_url,"canvas":{"width":img.width,"height":img.height},"layers":[]}
 
         layers=[]
+        segmentation_debug = {"items": []}
         combined = Image.new("L", img.size, 0)
         for i, item in enumerate(masks, start=1):
             lid = f"layer-{i}"
             m = LayerService._binarize_mask(item["mask"], img.size)
+            coverage = LayerService._mask_coverage(m)
             bbox = LayerService._bbox_from_mask(m)
+            debug_item = {
+                "id": lid,
+                "name": item["object"].get("name"),
+                "label_en": item["object"].get("label_en"),
+                "prompt": item.get("prompt"),
+                "mask_output_url": item.get("mask_output"),
+                "bbox": bbox,
+                "coverage": coverage,
+            }
+            if coverage < 0.005:
+                debug_item["valid"] = False
+                debug_item["reason"] = "mask_coverage_too_small"
+                segmentation_debug["items"].append(debug_item)
+                continue
+            if coverage > 0.85:
+                debug_item["valid"] = False
+                debug_item["reason"] = "mask_coverage_too_large"
+                segmentation_debug["items"].append(debug_item)
+                continue
             x,y,w,h = bbox["x"],bbox["y"],bbox["width"],bbox["height"]
             mask_path = out / f"{lid}-mask.png"; m.save(mask_path)
             rgba = img.copy(); rgba.putalpha(m)
@@ -108,7 +136,12 @@ class LayerService:
             layer_img.save(out / f"{lid}.png")
             combined = Image.composite(Image.new("L", img.size, 255), combined, m)
             obj = item["object"]
-            layers.append({"id":lid,"object_id":obj.get("id") or f"object-{i}","name":obj.get("name", f"对象{i}"),"label_en":obj.get("label_en"),"layer_url":f"/static/outputs/{image_id}/layers/{lid}.png","mask_url":f"/static/outputs/{image_id}/layers/{lid}-mask.png","bbox":bbox,"confidence":0.9,"z_index":i,"visible":True,"opacity":1,"transform":{"x":bbox["x"],"y":bbox["y"],"scale_x":1,"scale_y":1,"rotation":0,"flip_x":False,"flip_y":False}})
+            debug_item["valid"] = True
+            debug_item["reason"] = "ok"
+            debug_item["mask_url"] = f"/static/outputs/{image_id}/layers/{lid}-mask.png"
+            debug_item["layer_url"] = f"/static/outputs/{image_id}/layers/{lid}.png"
+            segmentation_debug["items"].append(debug_item)
+            layers.append({"id":lid,"object_id":obj.get("id") or f"object-{i}","name":obj.get("name", f"对象{i}"),"label_en":obj.get("label_en"),"prompt":item.get("prompt"),"layer_url":f"/static/outputs/{image_id}/layers/{lid}.png","mask_url":f"/static/outputs/{image_id}/layers/{lid}-mask.png","bbox":bbox,"coverage":coverage,"confidence":0.9,"z_index":i,"visible":True,"opacity":1,"transform":{"x":bbox["x"],"y":bbox["y"],"scale_x":1,"scale_y":1,"rotation":0,"flip_x":False,"flip_y":False}})
 
         inpaint_used=False; inpaint_fb=True; warning=None
         clean_background_url = processed_original_url
@@ -126,7 +159,9 @@ class LayerService:
         elif need_inpainting:
             warning = "当前未进行背景修补，移动元素后原位置可能仍保留原图内容。"
 
-        return {"status":"success","message":"对象图层提取完成","image_id":image_id,"fallback_used":False,"segmentation_method":"replicate_grounded_sam","inpainting_used":inpaint_used,"inpainting_fallback_used":inpaint_fb,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":clean_background_url,"background_url":clean_background_url,"canvas":{"width":img.width,"height":img.height},"layers":layers,"warning":warning}
+        if not layers:
+            return {"status":"empty_layers","message":"未提取到有效对象图层","image_id":image_id,"fallback_used":False,"segmentation_method":"replicate_grounded_sam","inpainting_used":inpaint_used,"inpainting_fallback_used":inpaint_fb,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":clean_background_url,"background_url":clean_background_url,"canvas":{"width":img.width,"height":img.height},"layers":[],"warning":warning or "分割结果无有效 mask","segmentation_debug":segmentation_debug}
+        return {"status":"success","message":"对象图层提取完成","image_id":image_id,"fallback_used":False,"segmentation_method":"replicate_grounded_sam","inpainting_used":inpaint_used,"inpainting_fallback_used":inpaint_fb,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":clean_background_url,"background_url":clean_background_url,"canvas":{"width":img.width,"height":img.height},"layers":layers,"warning":warning,"segmentation_debug":segmentation_debug}
 
     @staticmethod
     def decompose(image_url: str, max_layers: int = 8) -> dict:
