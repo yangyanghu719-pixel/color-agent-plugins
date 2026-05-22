@@ -75,11 +75,17 @@ class LayerDecomposeResponse(BaseModel):
     message: str
     image_id: str
     fallback_used: bool
+    segmentation_method: str = "none"
+    inpainting_used: bool = False
+    inpainting_fallback_used: bool = False
+    model_required: bool = False
+    user_message: Optional[str] = None
     original_image_url: str
     processed_original_url: Optional[str] = None
+    clean_background_url: Optional[str] = None
     canvas: dict
-    background_url: str
-    layers: List[LayerModel]
+    background_url: Optional[str] = None
+    layers: List[LayerModel] = Field(default_factory=list)
 
 
 class LayerComposeResponse(BaseModel):
@@ -88,6 +94,8 @@ class LayerComposeResponse(BaseModel):
     after_image_url: str
     composition_result_url: str
     operations_summary: List[str] = Field(default_factory=list)
+    inpainting_used: bool = False
+    warning: Optional[str] = None
 
 
 class CompositionAnalyzeResponse(BaseModel):

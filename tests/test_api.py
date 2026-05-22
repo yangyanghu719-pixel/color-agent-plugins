@@ -626,3 +626,46 @@ def test_layers_compose_with_cropped_layers(tmp_path):
     out = Path(data["after_image_url"].replace("/static/", "static/"))
     assert out.exists()
     assert Image.open(out).size == (decomp["canvas"]["width"], decomp["canvas"]["height"])
+
+
+def test_layers_decompose_needs_model_config(tmp_path, monkeypatch):
+    image_path = tmp_path / "compose-test.png"
+    _create_test_image(image_path)
+    monkeypatch.delenv("LAYER_DECOMPOSE_PROVIDER", raising=False)
+    resp = client.post("/layers/decompose", json={"image_url": str(image_path), "max_layers": 8})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "needs_model_config"
+    assert body["layers"] == []
+    assert body["model_required"] is True
+    assert "SAM" in body["message"] and "Qwen-Image-Layered" in body["message"]
+
+
+def test_manual_extract_creates_one_layer(tmp_path):
+    image_path = tmp_path / "manual-test.png"
+    _create_test_image(image_path)
+    resp = client.post("/layers/manual-extract", json={"image_url": str(image_path), "bbox": {"x": 10, "y": 10, "width": 50, "height": 40}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["segmentation_method"] == "manual"
+    assert len(body["layers"]) == 1
+
+
+def test_compose_returns_warning_without_inpaint(tmp_path):
+    image_path = tmp_path / "compose-bg.png"
+    _create_test_image(image_path)
+    d = client.post("/layers/manual-extract", json={"image_url": str(image_path), "bbox": {"x": 10, "y": 10, "width": 50, "height": 40}}).json()
+    layer = d["layers"][0]
+    payload = {"image_id": d["image_id"], "background_url": d["processed_original_url"], "layers": [{"id": layer["id"], "layer_url": layer["layer_url"], "x": 0, "y": 0}], "operations": [], "inpainting_used": False}
+    r = client.post("/layers/compose", json=payload)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["inpainting_used"] is False
+    assert "未进行背景修补" in b["warning"]
+
+
+def test_experiment_page_has_model_notice_text():
+    resp = client.get('/experiment')
+    assert resp.status_code == 200
+    assert '物体级图层拆解模型未配置' in resp.text
