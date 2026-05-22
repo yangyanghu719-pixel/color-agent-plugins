@@ -26,14 +26,13 @@ class ReplicateSegmentService:
         return model_ref, model, version
 
     @staticmethod
-    def _load_mask_from_output(output: Any) -> Image.Image:
-        parsed = ReplicateSegmentService.parse_grounded_sam_output(output)
+    def _load_mask_from_parsed(parsed: dict[str, Any]) -> Image.Image:
+        if parsed.get("mask_image"):
+            return parsed["mask_image"].convert("L")
         if parsed.get("mask_url"):
             resp = httpx.get(parsed["mask_url"], timeout=60)
             resp.raise_for_status()
             return Image.open(BytesIO(resp.content)).convert("L")
-        if parsed.get("mask_image"):
-            return parsed["mask_image"].convert("L")
         raise RuntimeError("grounded_sam output missing mask")
 
     @staticmethod
@@ -61,8 +60,17 @@ class ReplicateSegmentService:
             if output.startswith("http"):
                 return {"mask_url": output}
             return {}
-        if hasattr(output, "read") and hasattr(output, "url"):
-            return {"mask_url": str(output.url)}
+        if hasattr(output, "read"):
+            try:
+                data = output.read()
+                if isinstance(data, bytes):
+                    return {"mask_image": Image.open(BytesIO(data)).convert("L")}
+            except Exception:
+                if hasattr(output, "url"):
+                    return {"mask_url": str(output.url)}
+            if hasattr(output, "url"):
+                return {"mask_url": str(output.url)}
+            return {}
         if isinstance(output, dict):
             for k in ["mask", "mask_url", "segmentation", "output", "image"]:
                 v = output.get(k)
@@ -104,6 +112,6 @@ class ReplicateSegmentService:
                 "raw_output_type": type(output).__name__,
                 "raw_output_preview": raw_output_preview,
                 "mask_output": parsed.get("mask_url"),
-                "mask": ReplicateSegmentService._load_mask_from_output(output),
+                "mask": ReplicateSegmentService._load_mask_from_parsed(parsed),
             })
         return masks
