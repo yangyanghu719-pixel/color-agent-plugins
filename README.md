@@ -104,3 +104,26 @@ pytest -q
   - `INPAINT_PROVIDER=none|external`
   - `INPAINT_API_URL` / `INPAINT_API_KEY`
 - 当 provider 未配置时，`/layers/decompose` 会返回 `needs_model_config`，并明确提示模型未配置；不会再返回颜色碎片图层。
+
+## 构图实验对象提取配置（Replicate grounded_sam）
+
+构图实验对象自动提取主路径：
+Qwen-VL 对象词汇识别 → Replicate grounded_sam 分割 mask → 后端生成 RGBA 图层。
+
+必填环境变量：
+- `OBJECT_SEGMENT_PROVIDER=replicate_grounded_sam`
+- `REPLICATE_API_TOKEN=...`
+- `REPLICATE_GROUNDED_SAM_MODEL=schananas/grounded_sam`
+
+可选：
+- `REPLICATE_GROUNDED_SAM_VERSION=...`
+
+可选背景修补（与分割解耦）：
+- `INPAINT_PROVIDER=external`
+- `INPAINT_API_URL=...`
+- `INPAINT_API_KEY=...`
+
+说明：
+- grounded_sam 只负责对象 mask / segmentation。
+- clean background 必须由独立 inpainting API 提供；未配置时自动 fallback 为原图背景。
+- Qwen-VL 继续负责对象词汇识别与 before/after 构图分析。

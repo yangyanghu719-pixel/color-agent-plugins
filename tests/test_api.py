@@ -730,3 +730,41 @@ def test_extract_by_objects_external_inpaint(tmp_path, monkeypatch):
     monkeypatch.setattr('app.services.layer_service.httpx.Client', lambda timeout=60: C())
     body=client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫'}], 'need_inpainting': True}).json()
     assert body['inpainting_used'] is True and 'clean_background.png' in body['clean_background_url']
+
+def test_extract_by_objects_needs_replicate_token(tmp_path, monkeypatch):
+    image_path = tmp_path / "extract-no-token.png"
+    _create_test_image(image_path)
+    monkeypatch.setenv("OBJECT_SEGMENT_PROVIDER", "replicate_grounded_sam")
+    monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+    resp = client.post("/layers/extract-by-objects", json={"image_url": str(image_path), "objects": [{"id": "object-1", "name": "猫", "label_en": "cat"}], "need_inpainting": False})
+    body = resp.json()
+    assert body["status"] == "needs_model_config"
+
+
+def test_extract_by_objects_mock_replicate_mask_image(tmp_path, monkeypatch):
+    image_path = tmp_path / "extract-mask.png"
+    _create_test_image(image_path)
+    monkeypatch.setenv("OBJECT_SEGMENT_PROVIDER", "replicate_grounded_sam")
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "x")
+
+    def _mock_segment(*args, **kwargs):
+        mask = Image.new("L", (320, 240), 0)
+        d = ImageDraw.Draw(mask)
+        d.rectangle((30, 40, 120, 150), fill=255)
+        return [{"object": {"id": "object-1", "name": "猫", "label_en": "cat"}, "mask": mask}]
+
+    monkeypatch.setattr("app.services.layer_service.ReplicateSegmentService.segment_objects", _mock_segment)
+    resp = client.post("/layers/extract-by-objects", json={"image_url": str(image_path), "objects": [{"id": "object-1", "name": "猫", "label_en": "cat"}], "need_inpainting": False})
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["layers"][0]["label_en"] == "cat"
+    assert body["layers"][0]["bbox"]["width"] > 0
+
+
+def test_manual_extract_still_available(tmp_path):
+    image_path = tmp_path / "manual.png"
+    _create_test_image(image_path)
+    resp = client.post("/layers/manual-extract", json={"image_url": str(image_path), "bbox": {"x": 10, "y": 10, "width": 50, "height": 60}})
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["segmentation_method"] == "manual"
