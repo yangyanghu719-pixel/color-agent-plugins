@@ -93,25 +93,48 @@ def analyze_color_with_qwen(
     return content.strip()
 
 
+def _resolve_local_image_path(input_url: str) -> str:
+    from urllib.parse import urlparse
+    parsed = urlparse(input_url)
+    if parsed.scheme in {"http", "https"} and not parsed.path.startswith("/static/"):
+        raise ValueError("remote http(s) image URL is not supported; only this service static URL path (/static/...) is allowed")
+    raw_path = parsed.path if parsed.scheme in {"http", "https"} else input_url
+    if ".." in Path(raw_path).parts:
+        raise ValueError(f"invalid image path (path traversal): {input_url}")
+    candidate = (Path("static") / raw_path.removeprefix("/static/")) if raw_path.startswith("/static/") else Path(raw_path)
+    resolved = candidate.resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"image not found: {input_url}")
+    return str(resolved)
+
 def analyze_composition_with_qwen(before_image_url: str, after_image_url: str, layers_before: list, layers_after: list, operations: list, user_goal: str | None = None) -> str:
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
         raise RuntimeError("DASHSCOPE_API_KEY is not configured")
+    before_image_data_url = image_to_data_url(_resolve_local_image_path(before_image_url))
+    after_image_data_url = image_to_data_url(_resolve_local_image_path(after_image_url))
     prompt = """你是中文形式构成与构图课程助教。
 请只关注构图变化，不要主要分析色相/饱和度/明度。
 固定输出：
 ### 总体判断
 ### 构图变化
+### 视觉焦点
 ### 图层与空间关系
 ### 形式构成概念
 ### 学习建议
 总字数400字以内。
 """
+    structured = json.dumps({"layers_before": layers_before, "layers_after": layers_after, "operations": operations, "user_goal": user_goal}, ensure_ascii=False, default=_json_default)
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
     completion = client.chat.completions.create(
         model="qwen3.5-flash",
-        messages=[{"role":"user","content": f"before={before_image_url} after={after_image_url} ops={json.dumps(operations,ensure_ascii=False)}\n{prompt}"}],
+        messages=[{"role":"user","content": [
+            {"type": "text", "text": "第一张图是调整前，第二张图是调整后，请比较构图变化。"},
+            {"type": "image_url", "image_url": {"url": before_image_data_url}},
+            {"type": "image_url", "image_url": {"url": after_image_data_url}},
+            {"type": "text", "text": f"{prompt}\n结构化数据：{structured}"},
+        ]}],
         extra_body={"enable_thinking": False},
     )
     content = completion.choices[0].message.content
