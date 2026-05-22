@@ -24,6 +24,19 @@ class ReplicateSegmentService:
     @staticmethod
     def parse_grounded_sam_output(output: Any) -> dict[str, Any]:
         if isinstance(output, list):
+            # grounded_sam output order:
+            # 1) annotated_picture_mask
+            # 2) neg_annotated_picture_mask
+            # 3) mask
+            # 4) inverted_mask
+            if len(output) >= 3:
+                parsed = ReplicateSegmentService.parse_grounded_sam_output(output[2])
+                if parsed:
+                    return parsed
+            for item in output:
+                parsed = ReplicateSegmentService.parse_grounded_sam_output(item)
+                if parsed.get("mask_url") and "/mask." in parsed["mask_url"] and "inverted_mask" not in parsed["mask_url"]:
+                    return parsed
             for item in output:
                 parsed = ReplicateSegmentService.parse_grounded_sam_output(item)
                 if parsed:
@@ -58,10 +71,21 @@ class ReplicateSegmentService:
             prompt = (obj.get("label_en") or obj.get("name") or "").strip()
             if not prompt:
                 continue
-            inputs = {"image": BytesIO(img_bytes), "text_prompt": prompt}
+            inputs = {
+                "image": BytesIO(img_bytes),
+                "mask_prompt": prompt,
+                "negative_mask_prompt": "",
+                "adjustment_factor": 0,
+            }
             if version:
                 output = client.run(f"{model}:{version}", input=inputs)
             else:
                 output = client.run(model, input=inputs)
-            masks.append({"object": obj, "prompt": prompt, "mask": ReplicateSegmentService._load_mask_from_output(output)})
+            parsed = ReplicateSegmentService.parse_grounded_sam_output(output)
+            masks.append({
+                "object": obj,
+                "prompt": prompt,
+                "mask_output": parsed.get("mask_url"),
+                "mask": ReplicateSegmentService._load_mask_from_output(output),
+            })
         return masks
