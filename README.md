@@ -85,3 +85,22 @@ pytest -q
 4. 构图实验：提取画面元素图层、拖拽缩放旋转镜像、调整图层顺序、生成构图反馈
 
 > 构图实验第一阶段在无外部图层模型时使用 fallback 近似图层拆解（fallback_used=true），后续可接入 Qwen-Image-Layered、SAM、DesignEdit。
+
+## 构图实验技术路线（已修正）
+
+构图实验的目标是：
+- 物体级分割（object segmentation）
+- RGBA 图层提取（layer extraction）
+- 背景自动修补（inpainting）
+- 图层重组（canvas editing）
+- Qwen-VL 构图分析（composition analysis）
+
+重要说明：
+- 色彩实验可使用 KMeans 色彩聚类；构图实验默认**不会**使用 KMeans 伪装物体拆解。
+- Render 免费版不直接运行 SAM / diffusion / 大型图层模型。
+- 需要通过环境变量配置外部服务：
+  - `LAYER_DECOMPOSE_PROVIDER=none|external|sam|manual`
+  - `LAYER_DECOMPOSE_API_URL` / `LAYER_DECOMPOSE_API_KEY`
+  - `INPAINT_PROVIDER=none|external`
+  - `INPAINT_API_URL` / `INPAINT_API_KEY`
+- 当 provider 未配置时，`/layers/decompose` 会返回 `needs_model_config`，并明确提示模型未配置；不会再返回颜色碎片图层。

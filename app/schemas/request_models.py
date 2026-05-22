@@ -111,3 +111,8 @@ class CompositionAnalyzeRequest(BaseModel):
     layers_after: List[dict[str, Any]] = Field(default_factory=list)
     operations: List[CompositionOperationModel] = Field(default_factory=list)
     user_goal: Optional[str] = None
+
+
+class ManualExtractRequest(BaseModel):
+    image_url: str
+    bbox: dict[str, float]
