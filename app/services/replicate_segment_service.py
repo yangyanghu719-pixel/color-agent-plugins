@@ -26,7 +26,8 @@ class ReplicateSegmentService:
         return model_ref, model, version
 
     @staticmethod
-    def _load_mask_from_parsed(parsed: dict[str, Any]) -> Image.Image:
+    def _load_mask_from_output(output: Any) -> Image.Image:
+        parsed = ReplicateSegmentService.parse_grounded_sam_output(output)
         if parsed.get("mask_image"):
             return parsed["mask_image"].convert("L")
         if parsed.get("mask_url"):
@@ -61,13 +62,9 @@ class ReplicateSegmentService:
                 return {"mask_url": output}
             return {}
         if hasattr(output, "read"):
-            try:
-                data = output.read()
-                if isinstance(data, bytes):
-                    return {"mask_image": Image.open(BytesIO(data)).convert("L")}
-            except Exception:
-                if hasattr(output, "url") and isinstance(getattr(output, "url"), str) and output.url.startswith("http"):
-                    return {"mask_url": output.url}
+            data = output.read()
+            if isinstance(data, bytes):
+                return {"mask_image": Image.open(BytesIO(data)).convert("L")}
             return {}
         if isinstance(output, dict):
             for k in ["mask", "mask_url", "segmentation", "output", "image"]:
@@ -110,6 +107,6 @@ class ReplicateSegmentService:
                 "raw_output_type": type(output).__name__,
                 "raw_output_preview": raw_output_preview,
                 "mask_output": parsed.get("mask_url"),
-                "mask": ReplicateSegmentService._load_mask_from_parsed(parsed),
+                "mask": ReplicateSegmentService._load_mask_from_output(output),
             })
         return masks
