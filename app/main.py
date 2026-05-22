@@ -5,7 +5,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.schemas.request_models import AnalyzeRequest, CompositionAnalyzeRequest, LayerComposeRequest, LayerDecomposeRequest, RecolorRequest, SegmentRequest
+from app.schemas.request_models import AnalyzeRequest, CompositionAnalyzeRequest, LayerComposeRequest, LayerDecomposeRequest, ManualExtractRequest, RecolorRequest, SegmentRequest
 from app.schemas.response_models import AnalyzeResponse, CompositionAnalyzeResponse, HealthResponse, LayerComposeResponse, LayerDecomposeResponse, RecolorResponse, SegmentResponse
 from app.services.analyze_service import AnalyzeService
 from app.services.composition_analyze_service import CompositionAnalyzeService
@@ -27,6 +27,8 @@ def recolor(payload: RecolorRequest): return RecolorService.recolor(payload)
 def analyze(payload: AnalyzeRequest): return AnalyzeService.analyze(payload)
 @app.post('/layers/decompose', response_model=LayerDecomposeResponse)
 def layer_decompose(payload: LayerDecomposeRequest): return LayerService.decompose(payload.image_url, payload.max_layers)
+@app.post('/layers/manual-extract', response_model=LayerDecomposeResponse)
+def layer_manual_extract(payload: ManualExtractRequest): return LayerService.manual_extract(payload.image_url, payload.bbox)
 @app.post('/layers/compose', response_model=LayerComposeResponse)
 def layer_compose(payload: LayerComposeRequest): return LayerService.compose(payload.model_dump())
 @app.post('/composition/analyze', response_model=CompositionAnalyzeResponse)
