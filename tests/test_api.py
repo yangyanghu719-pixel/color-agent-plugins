@@ -489,3 +489,66 @@ def test_composition_analyze_fallback():
     assert r.status_code == 200
     b = r.json()
     assert b['fallback_used'] is True
+
+def test_experiment_color_full_ui_keywords():
+    resp = client.get('/experiment')
+    txt = resp.text
+    for kw in ['原图 canvas', '预览 canvas', 'H:', '保存该色块调整 /recolor', '生成色彩反馈 /analyze']:
+        assert kw in txt
+
+
+def test_decompose_layer_is_cropped_not_vertical_strip(tmp_path):
+    image_path = tmp_path / 'decompose.png'
+    _create_test_image(image_path)
+    body = client.post('/layers/decompose', json={'image_url': str(image_path), 'max_layers': 6}).json()
+    assert body['status'] == 'success'
+    assert body['layers']
+    for layer in body['layers']:
+        lp = Path(layer['layer_url'].replace('/static/', 'static/'))
+        im = Image.open(lp)
+        bw, bh = layer['bbox']['width'], layer['bbox']['height']
+        assert abs(im.width - bw) <= 2 and abs(im.height - bh) <= 2
+
+
+def test_compose_respects_z_index(tmp_path):
+    img = Image.new('RGBA', (60, 60), (255, 255, 255, 255))
+    bg_path = tmp_path / 'bg.png'; img.save(bg_path)
+    red = Image.new('RGBA', (30, 30), (255, 0, 0, 255)); redp = tmp_path / 'r.png'; red.save(redp)
+    blue = Image.new('RGBA', (30, 30), (0, 0, 255, 255)); bluep = tmp_path / 'b.png'; blue.save(bluep)
+    payload = {'image_id': 'ztest', 'background_url': str(bg_path), 'layers': [
+        {'id': 'a', 'layer_url': str(redp), 'x': 10, 'y': 10, 'scale_x': 1, 'scale_y': 1, 'rotation': 0, 'flip_x': False, 'flip_y': False, 'visible': True, 'opacity': 1, 'z_index': 1},
+        {'id': 'b', 'layer_url': str(bluep), 'x': 10, 'y': 10, 'scale_x': 1, 'scale_y': 1, 'rotation': 0, 'flip_x': False, 'flip_y': False, 'visible': True, 'opacity': 1, 'z_index': 2},
+    ], 'operations': []}
+    out = client.post('/layers/compose', json=payload).json()
+    im = Image.open(Path(out['after_image_url'].replace('/static/', 'static/')))
+    assert im.getpixel((20, 20))[2] > 200
+
+
+def test_experiment_has_context_menu_and_transform_ops_keywords():
+    txt = client.get('/experiment').text
+    for kw in ['置于顶层', '置于底层', '上移一层', '下移一层', '水平镜像', '垂直镜像', '隐藏图层', '删除图层', '重置该元素', 'transformend', "'scale'", "'rotate'"]:
+        assert kw in txt
+
+
+def test_composition_analyze_fallback_without_api_key(tmp_path, monkeypatch):
+    before = tmp_path / 'before.png'; after = tmp_path / 'after.png'
+    _create_test_image(before); _create_test_image(after)
+    monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
+    payload = {'before_image_url': str(before), 'after_image_url': str(after), 'layers_before': [], 'layers_after': [], 'operations': [], 'user_goal': 'x'}
+    body = client.post('/composition/analyze', json=payload).json()
+    assert body['status'] == 'success' and body['fallback_used'] is True
+
+
+def test_composition_analyze_qwen_uses_image_url_message(tmp_path, monkeypatch):
+    before = tmp_path / 'before.png'; after = tmp_path / 'after.png'
+    _create_test_image(before); _create_test_image(after)
+    monkeypatch.setenv('DASHSCOPE_API_KEY', 'x')
+    called = {}
+    def _mock(**kwargs):
+        called.update(kwargs)
+        return '### 总体判断\nok'
+    monkeypatch.setattr('app.services.composition_analyze_service.analyze_composition_with_qwen', _mock)
+    payload = {'before_image_url': str(before), 'after_image_url': str(after), 'layers_before': [], 'layers_after': [], 'operations': [{'type':'move','layer_id':'l1','description':'move'}], 'user_goal': 'x'}
+    body = client.post('/composition/analyze', json=payload).json()
+    assert body.get('status') == 'success'
+    assert called.get('before_image_url') == str(before)
