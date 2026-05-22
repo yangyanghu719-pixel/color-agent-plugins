@@ -655,3 +655,78 @@ def test_experiment_page_has_model_notice_text():
     resp = client.get('/experiment')
     assert resp.status_code == 200
     assert '物体级图层拆解模型未配置' in resp.text
+
+def test_composition_objects_without_api_key(tmp_path, monkeypatch):
+    image_path = tmp_path / 'obj.png'; _create_test_image(image_path)
+    monkeypatch.delenv('DASHSCOPE_API_KEY', raising=False)
+    resp = client.post('/composition/objects', json={'image_url': str(image_path)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['fallback_used'] is True
+
+
+def test_composition_objects_with_mocked_qwen(tmp_path, monkeypatch):
+    image_path = tmp_path / 'obj2.png'; _create_test_image(image_path)
+    monkeypatch.setenv('DASHSCOPE_API_KEY', 'x')
+    monkeypatch.setattr('app.services.layer_service.detect_objects_with_qwen', lambda p: [{'name':'猫','label_en':'cat','description':'右下','confidence':0.9}])
+    body = client.post('/composition/objects', json={'image_url': str(image_path)}).json()
+    assert body['objects'][0]['name'] == '猫'
+
+
+def test_extract_by_objects_provider_none(tmp_path, monkeypatch):
+    image_path = tmp_path / 'obj3.png'; _create_test_image(image_path)
+    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'none')
+    body = client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫','label_en':'cat'}], 'need_inpainting': True}).json()
+    assert body['status'] == 'needs_model_config'
+
+
+def test_manual_extract_route_exists(tmp_path):
+    image_path = tmp_path / 'manual.png'; _create_test_image(image_path)
+    resp = client.post('/layers/manual-extract', json={'image_url': str(image_path), 'bbox': {'x': 10, 'y': 20, 'width': 40, 'height': 50}})
+    assert resp.status_code == 200
+
+
+def test_experiment_contains_object_ui():
+    resp = client.get('/experiment')
+    for keyword in ['已识别到的画面对象', '提取所选对象为图层', '手动框选模式']:
+        assert keyword in resp.text
+
+def test_extract_by_objects_external_mask(tmp_path, monkeypatch):
+    import base64, io
+    image_path = tmp_path / 'ext.png'; _create_test_image(image_path)
+    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'external')
+    monkeypatch.setenv('OBJECT_SEGMENT_API_URL', 'http://seg')
+    monkeypatch.setenv('OBJECT_SEGMENT_API_KEY', 'k')
+    mask = Image.new('L', (320,240), 0); ImageDraw.Draw(mask).rectangle((10,10,60,80), fill=255)
+    buf=io.BytesIO(); mask.save(buf, format='PNG'); m64=base64.b64encode(buf.getvalue()).decode()
+    class R:
+        def __init__(self,d): self._d=d
+        def raise_for_status(self): pass
+        def json(self): return self._d
+    class C:
+        def __enter__(self): return self
+        def __exit__(self,*a): pass
+        def post(self,*a,**k): return R({'objects':[{'id':'object-1','name':'猫','label_en':'cat','bbox':{'x':10,'y':10,'width':50,'height':70},'mask_base64':m64,'confidence':0.9}]})
+    monkeypatch.setattr('app.services.layer_service.httpx.Client', lambda timeout=60: C())
+    body = client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫','label_en':'cat'}], 'need_inpainting': False}).json()
+    assert body['status'] == 'success' and body['layers'][0]['mask_url']
+
+
+def test_extract_by_objects_external_inpaint(tmp_path, monkeypatch):
+    import base64, io
+    image_path = tmp_path / 'ext2.png'; _create_test_image(image_path)
+    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'external'); monkeypatch.setenv('OBJECT_SEGMENT_API_URL', 'http://seg'); monkeypatch.setenv('INPAINT_PROVIDER', 'external'); monkeypatch.setenv('INPAINT_API_URL', 'http://inpaint')
+    mask = Image.new('L', (320,240), 255); b1=io.BytesIO(); mask.save(b1, format='PNG'); m64=base64.b64encode(b1.getvalue()).decode()
+    clean = Image.new('RGBA', (320,240), (255,255,255,255)); b2=io.BytesIO(); clean.save(b2, format='PNG'); c64=base64.b64encode(b2.getvalue()).decode()
+    class R:
+        def __init__(self,d): self._d=d
+        def raise_for_status(self): pass
+        def json(self): return self._d
+    class C:
+        def __enter__(self): return self
+        def __exit__(self,*a): pass
+        def post(self,url,*a,**k):
+            return R({'objects':[{'id':'object-1','name':'猫','bbox':{'x':0,'y':0,'width':320,'height':240},'mask_base64':m64}]}) if 'seg' in url else R({'clean_background_base64':c64})
+    monkeypatch.setattr('app.services.layer_service.httpx.Client', lambda timeout=60: C())
+    body=client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫'}], 'need_inpainting': True}).json()
+    assert body['inpainting_used'] is True and 'clean_background.png' in body['clean_background_url']
