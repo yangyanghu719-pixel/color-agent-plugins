@@ -74,6 +74,20 @@ def test_experiment_template_has_error_gate_and_empty_layers_gate():
     assert "showExtractDebug(b)" in html
 
 
+def test_experiment_template_regression_and_stability_guards():
+    html = client.get('/experiment').text
+    assert "origCanvas" in html and "previewCanvas" in html
+    assert "$('saveSwatch').onclick=()=>{" in html
+    assert "$('compositionWorkspace').classList.remove('hidden');setStep(0);" not in html
+    assert "$('startComp').onclick=async()=>{$('startComp').disabled=true;$('compositionWorkspace').classList.remove('hidden');" in html
+    assert "if(!res.ok)throw new Error(err);" in html
+    assert "function escapeHtml(s)" in html
+    assert "renderObjects(){const objs=S.detectedObjects||[];$('objList').innerHTML=objs.map(o=>`<div class=\"obj-card" in html
+    assert "clearManualState();}catch(e){msg(e.message)}finally{$('manualConfirm').disabled=false;}}" in html
+    assert "selectedNode=null;tr.nodes([]);op('delete'" in html
+    assert "<div id='menu'></div>" not in html
+
+
 def test_build_replicate_model_ref_rules(monkeypatch):
     full_version = "a" * 64
     monkeypatch.setenv("REPLICATE_GROUNDED_SAM_MODEL", "schananas/grounded_sam")
