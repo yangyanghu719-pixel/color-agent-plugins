@@ -466,13 +466,15 @@ def test_layers_decompose_and_compose(tmp_path):
     d = client.post('/layers/decompose', json={'image_url': str(image_path), 'max_layers': 4})
     assert d.status_code == 200
     db = d.json()
-    assert db['status'] == 'success' and db['image_id'] and isinstance(db['layers'], list) and db['canvas']
-    assert 'fallback_used' in db
-    layers = db['layers']
-    c = client.post('/layers/compose', json={'image_id': db['image_id'], 'background_url': db['background_url'], 'layers': [{
+    assert db['status'] == 'needs_model_config' and db['image_id'] and isinstance(db['layers'], list) and db['canvas']
+    assert db['layers'] == []
+    m = client.post('/layers/manual-extract', json={'image_url': str(image_path), 'bbox': {'x': 20, 'y': 20, 'width': 120, 'height': 120}}).json()
+    assert m['status'] == 'success' and len(m['layers']) == 1
+    l = m['layers'][0]
+    c = client.post('/layers/compose', json={'image_id': m['image_id'], 'background_url': m['processed_original_url'], 'layers': [{
         'id': l['id'], 'layer_url': l['layer_url'], 'x': l['transform']['x'], 'y': l['transform']['y'], 'scale_x': 1, 'scale_y': 1,
-        'rotation': 0, 'flip_x': False, 'flip_y': False, 'visible': True, 'opacity': 1, 'z_index': i
-    } for i,l in enumerate(reversed(layers),1)], 'operations':[{'type':'bring_to_front','layer_id':layers[0]['id'],'description':'置于顶层'}]})
+        'rotation': 0, 'flip_x': False, 'flip_y': False, 'visible': True, 'opacity': 1, 'z_index': 1
+    }], 'operations':[{'type':'bring_to_front','layer_id':l['id'],'description':'置于顶层'}], 'inpainting_used': False})
     assert c.status_code == 200
     cb = c.json()
     assert cb['after_image_url'].startswith('/static/outputs/')
@@ -501,13 +503,8 @@ def test_decompose_layer_is_cropped_not_vertical_strip(tmp_path):
     image_path = tmp_path / 'decompose.png'
     _create_test_image(image_path)
     body = client.post('/layers/decompose', json={'image_url': str(image_path), 'max_layers': 6}).json()
-    assert body['status'] == 'success'
-    assert body['layers']
-    for layer in body['layers']:
-        lp = Path(layer['layer_url'].replace('/static/', 'static/'))
-        im = Image.open(lp)
-        bw, bh = layer['bbox']['width'], layer['bbox']['height']
-        assert abs(im.width - bw) <= 2 and abs(im.height - bh) <= 2
+    assert body['status'] == 'needs_model_config'
+    assert body['layers'] == []
 
 
 def test_compose_respects_z_index(tmp_path):
@@ -566,9 +563,8 @@ def test_layers_decompose_resizes_and_generates_cropped_layers(tmp_path):
     resp = client.post("/layers/decompose", json={"image_url": str(image_path), "max_layers": 6})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["status"] == "success"
+    assert body["status"] == "needs_model_config"
     assert body["fallback_used"] is True
-    assert "近似图层拆解" in body["message"]
 
     canvas_w = body["canvas"]["width"]
     canvas_h = body["canvas"]["height"]
@@ -578,17 +574,7 @@ def test_layers_decompose_resizes_and_generates_cropped_layers(tmp_path):
     processed = Path(body["processed_original_url"].replace("/static/", "static/"))
     assert processed.exists()
 
-    has_cropped_layer = False
-    for layer in body["layers"]:
-        layer_path = Path(layer["layer_url"].replace("/static/", "static/"))
-        assert layer_path.exists()
-        lw, lh = Image.open(layer_path).size
-        bbox = layer["bbox"]
-        assert lw <= bbox["width"]
-        assert lh <= bbox["height"]
-        if lw < canvas_w or lh < canvas_h:
-            has_cropped_layer = True
-    assert has_cropped_layer
+    assert body["layers"] == []
 
 
 def test_layers_compose_with_cropped_layers(tmp_path):
@@ -596,13 +582,12 @@ def test_layers_compose_with_cropped_layers(tmp_path):
     _create_test_image(image_path)
 
     decomp = client.post("/layers/decompose", json={"image_url": str(image_path), "max_layers": 4}).json()
-    assert decomp["status"] == "success"
-    assert decomp["layers"]
-
-    layer = decomp["layers"][0]
+    assert decomp["status"] == "needs_model_config"
+    man = client.post("/layers/manual-extract", json={"image_url": str(image_path), "bbox": {"x": 30, "y": 30, "width": 120, "height": 90}}).json()
+    layer = man["layers"][0]
     compose_payload = {
-        "image_id": decomp["image_id"],
-        "background_url": decomp["background_url"],
+        "image_id": man["image_id"],
+        "background_url": man["processed_original_url"],
         "layers": [{
             "id": layer["id"],
             "layer_url": layer["layer_url"],
@@ -618,6 +603,7 @@ def test_layers_compose_with_cropped_layers(tmp_path):
             "z_index": 1,
         }],
         "operations": [{"type": "place", "layer_id": layer["id"], "description": "place test layer"}],
+        "inpainting_used": False,
     }
     composed = client.post("/layers/compose", json=compose_payload)
     assert composed.status_code == 200
@@ -625,7 +611,7 @@ def test_layers_compose_with_cropped_layers(tmp_path):
     assert data["status"] == "success"
     out = Path(data["after_image_url"].replace("/static/", "static/"))
     assert out.exists()
-    assert Image.open(out).size == (decomp["canvas"]["width"], decomp["canvas"]["height"])
+    assert Image.open(out).size == (man["canvas"]["width"], man["canvas"]["height"])
 
 
 def test_layers_decompose_needs_model_config(tmp_path, monkeypatch):
