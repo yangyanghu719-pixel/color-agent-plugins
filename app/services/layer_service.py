@@ -6,6 +6,8 @@ from uuid import uuid4
 import numpy as np
 from PIL import Image, ImageOps
 
+from app.utils.image_io import resize_for_processing
+
 
 class LayerService:
     @staticmethod
@@ -79,11 +81,19 @@ class LayerService:
 
     @staticmethod
     def decompose(image_url: str, max_layers: int = 8) -> dict:
-        img = Image.open(LayerService._path_from_static(image_url)).convert('RGBA')
+        src = Image.open(LayerService._path_from_static(image_url)).convert('RGBA')
+        max_side = 1024
+        max_pixels = 1024 * 1024
+        img = resize_for_processing(src, max_side=max_side)
+        if img.width * img.height > max_pixels:
+            pixel_side = int(max_pixels ** 0.5)
+            img = resize_for_processing(img, max_side=pixel_side)
         w, h = img.size
         image_id = f"img-{uuid4().hex[:12]}"
         out = Path('static/outputs') / image_id / 'layers'
         out.mkdir(parents=True, exist_ok=True)
+        processed_original_path = out / 'processed_original.png'
+        img.save(processed_original_path)
         bg = Image.new('RGBA', (w, h), (255, 255, 255, 255))
         bg.save(out / 'background.png')
 
@@ -95,6 +105,8 @@ class LayerService:
         for m in masks:
             for comp in LayerService._connected_components(m):
                 if comp["area"] < min_area:
+                    continue
+                if comp["area"] > int(w * h * 0.95):
                     continue
                 x0, y0, x1, y1 = comp["bbox"]
                 local_mask = m[y0:y1, x0:x1]
@@ -123,7 +135,8 @@ class LayerService:
             if len(layers) >= max_layers:
                 break
 
-        resp = {"status": "success", "message": "fallback 图层拆解完成", "image_id": image_id, "fallback_used": True, "original_image_url": image_url, "canvas": {"width": w, "height": h}, "background_url": f"/static/outputs/{image_id}/layers/background.png", "layers": layers}
+        resized_notice = "（图片过大，系统已自动压缩）" if (src.size != img.size) else ""
+        resp = {"status": "success", "message": f"当前为近似图层拆解（轻量 fallback）{resized_notice}", "image_id": image_id, "fallback_used": True, "original_image_url": image_url, "processed_original_url": f"/static/outputs/{image_id}/layers/processed_original.png", "canvas": {"width": w, "height": h}, "background_url": f"/static/outputs/{image_id}/layers/background.png", "layers": layers}
         (Path('static/outputs') / image_id / 'layer_decompose_result.json').write_text(json.dumps(resp, ensure_ascii=False, indent=2), encoding='utf-8')
         return resp
 
@@ -135,20 +148,23 @@ class LayerService:
             if not l.get('visible', True):
                 continue
             im = Image.open(LayerService._path_from_static(l['layer_url'])).convert('RGBA')
-            sx = max(0.01, abs(float(l.get('scale_x', 1))))
-            sy = max(0.01, abs(float(l.get('scale_y', 1))))
-            if l.get('flip_x'):
+            sx = max(0.01, abs(float(l.get('scale_x', l.get('transform', {}).get('scale_x', 1)))))
+            sy = max(0.01, abs(float(l.get('scale_y', l.get('transform', {}).get('scale_y', 1)))))
+            if l.get('flip_x', l.get('transform', {}).get('flip_x', False)):
                 im = ImageOps.mirror(im)
-            if l.get('flip_y'):
+            if l.get('flip_y', l.get('transform', {}).get('flip_y', False)):
                 im = ImageOps.flip(im)
             im = im.resize((max(1, int(im.width * sx)), max(1, int(im.height * sy))))
-            if l.get('rotation'):
-                im = im.rotate(float(l['rotation']), expand=True)
+            rotation = float(l.get('rotation', l.get('transform', {}).get('rotation', 0)))
+            if rotation:
+                im = im.rotate(rotation, expand=True)
             opacity = float(l.get('opacity', 1))
             if opacity < 1:
                 a = im.split()[-1].point(lambda p: int(p * opacity))
                 im.putalpha(a)
-            bg.alpha_composite(im, (int(l.get('x', 0)), int(l.get('y', 0))))
+            x = int(l.get('x', l.get('transform', {}).get('x', 0)))
+            y = int(l.get('y', l.get('transform', {}).get('y', 0)))
+            bg.alpha_composite(im, (x, y))
         outdir = Path('static/outputs') / image_id
         outdir.mkdir(parents=True, exist_ok=True)
         name = f"composition_{uuid4().hex[:8]}.png"

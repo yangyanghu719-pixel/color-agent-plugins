@@ -76,6 +76,7 @@ class LayerDecomposeResponse(BaseModel):
     image_id: str
     fallback_used: bool
     original_image_url: str
+    processed_original_url: Optional[str] = None
     canvas: dict
     background_url: str
     layers: List[LayerModel]
