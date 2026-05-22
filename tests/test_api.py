@@ -775,3 +775,11 @@ def test_manual_extract_still_available(tmp_path):
     body = resp.json()
     assert body["status"] == "success"
     assert body["segmentation_method"] == "manual"
+
+def test_experiment_composition_ux_contract_keywords_and_structure():
+    txt = client.get('/experiment').text
+    assert txt.count('id=\'manualModeBtn\'') == 1
+    for kw in ["prompt('x')", "prompt('y')", "prompt('width')", "prompt('height')"]:
+        assert kw not in txt
+    for kw in ['上传作品','识别对象','选择对象','提取图层','构图编辑','生成反馈','正在识别画面对象……','正在提取图层，可能需要 20–60 秒……','没有自动识别到可用对象，可以重新上传更清晰图片，或使用手动框选模式。','置于顶层','置于底层','上移一层','下移一层','水平镜像','垂直镜像','隐藏图层','删除图层','重置该元素','transformend',"'scale'","'rotate'","id='previewWrap'","id='manualOverlay'","<details id='devDebug'>","id='analyzeComp' class='primary' disabled",'请先保存当前构图，再生成反馈。','当前画布有新改动，请重新保存后再生成反馈。','if(b.status!==\'success\'||!b.layers||b.layers.length===0)','name:\'background\'','filter(Boolean)']:
+        assert kw in txt
