@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>构图测试实验台</title>
+  <style>
+    body { margin: 0; font-family: "PingFang SC","Microsoft YaHei",sans-serif; background: #f5f6fb; color: #1f1f2e; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .card { background: #fff; border: 1px solid #e8e8ef; border-radius: 12px; padding: 14px; }
+    .topbar { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+    .toolbar { display: flex; gap: 8px; }
+    .btn { border: 1px solid #e8e8ef; background: #fff; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+    .btn.primary { background: #6f5cff; border-color: #6f5cff; color: #fff; }
+    .hidden { display: none !important; }
+    .panels { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .imgbox { min-height: 280px; display: grid; place-items: center; background: #f8f8fb; border-radius: 8px; overflow: hidden; }
+    .imgbox img { max-width: 100%; max-height: 560px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card topbar">
+      <h1>构图测试实验台</h1>
+      <p>上传后查看原图与当前实验图，用于后续构图与形式构成对比分析。</p>
+      <div class="toolbar">
+        <button class="btn" id="guideBtn">使用说明</button>
+        <button class="btn" id="mentorBtn">实验导师</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px; text-align:center;">
+      <input id="fileInput" type="file" class="hidden" accept=".png,.jpg,.jpeg,.webp" />
+      <button id="uploadBtn" class="btn primary">上传图片</button>
+      <p id="status"></p>
+    </div>
+
+    <div id="imagePanels" class="panels hidden">
+      <div class="card">
+        <h3>上传原图</h3>
+        <div class="imgbox"><img id="originalImg" alt="上传原图" /></div>
+      </div>
+      <div class="card">
+        <h3>调整后整图实时预览 / 当前实验图</h3>
+        <div class="imgbox"><img id="currentImg" alt="当前实验图" /></div>
+      </div>
+    </div>
+  </div>
+<script>
+  const API_BASE = window.location.origin;
+  const $ = (id) => document.getElementById(id);
+  $("uploadBtn").onclick = () => $("fileInput").click();
+  $("guideBtn").onclick = () => alert("上传图片后可同时查看原图与当前实验图。后续将用于构图与形式构成分析。");
+  $("mentorBtn").onclick = () => alert("实验导师：构图与形式构成分析助教");
+
+  $("fileInput").onchange = async () => {
+    const file = $("fileInput").files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    $("status").textContent = "上传中...";
+    const resp = await fetch(`${API_BASE}/upload-image`, { method: "POST", body: fd });
+    const body = await resp.json();
+    if (!resp.ok || body.status !== "success") {
+      $("status").textContent = body.message || "上传失败";
+      return;
+    }
+    $("originalImg").src = body.original_image_display_url;
+    $("currentImg").src = body.current_image_display_url;
+    $("imagePanels").classList.remove("hidden");
+    $("status").textContent = "上传成功";
+  };
+</script>
+</body>
+</html>

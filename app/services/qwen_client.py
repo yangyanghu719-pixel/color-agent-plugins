@@ -10,8 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 logger = logging.getLogger(__name__)
+
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, BaseModel):
@@ -32,7 +32,7 @@ def image_to_data_url(image_path: str) -> str:
     return f"data:{mime_type};base64,{encoded}"
 
 
-def analyze_color_with_qwen(
+def analyze_composition_with_qwen(
     before_image_path: str,
     after_image_path: str,
     color_regions: list[dict[str, Any]],
@@ -46,26 +46,25 @@ def analyze_color_with_qwen(
     before_image_data_url = image_to_data_url(before_image_path)
     after_image_data_url = image_to_data_url(after_image_path)
     prompt = (
-        "你是中文色彩设计课程助教。请基于两张图片与结构化数据，仅输出简短 Markdown 反馈。\n"
+        "你是中文‘构图与形式构成’课程助教。请基于两张图片与结构化数据，仅输出简短 Markdown 反馈。\n"
         "严格使用以下结构，不要增加其他标题或前言：\n"
         "### 总体判断\n"
-        "用 1-2 句话说明本次调色整体效果。\n\n"
-        "### 色彩变化\n"
-        "- **色相**：说明色相关系变化。\n"
-        "- **饱和度**：说明饱和度变化。\n"
-        "- **明度**：说明明度变化。\n\n"
-        "### 视觉效果\n"
-        "说明主体突出、视觉层级、画面平衡的变化。\n\n"
+        "用 1-2 句话说明本次调整的构图整体效果。\n\n"
+        "### 构图差异\n"
+        "- **点线面**：概括两图在点、线、面组织上的差异。\n"
+        "- **主体关系**：说明主体与次主体、背景的关系变化。\n"
+        "- **视觉重心与均衡**：说明重心偏移、画面均衡与张力变化。\n\n"
+        "### 形式节奏\n"
+        "分析节奏、层次、方向感与留白的变化。\n\n"
         "### 学习建议\n"
         "给设计学生一句具体可操作建议。\n\n"
         "限制要求：\n"
         "- 总字数不超过 350 字。\n"
         "- 不要输出 JSON。\n"
-        "- 不要输出“详细配色分析报告”。\n"
         "- 不要输出多余前言。\n"
         "- 不要编造图片中没有的信息。\n"
-        "- 只围绕色彩关系、视觉层级、情绪表达分析。\n\n"
-        f"结构化数据如下：\n{json.dumps({'color_regions': color_regions, 'hsl_change': hsl_change, 'rule_analysis': rule_analysis}, ensure_ascii=False, default=_json_default)}"
+        "- 只围绕点线面、主体关系、视觉重心、画面均衡、节奏、层次、方向感、留白、画面张力分析。\n\n"
+        f"结构化数据如下：\n{json.dumps({'color_regions': color_regions, 'adjustment_change': hsl_change, 'rule_analysis': rule_analysis}, ensure_ascii=False, default=_json_default)}"
     )
 
     from openai import OpenAI
@@ -77,7 +76,7 @@ def analyze_color_with_qwen(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "第一张图片是调色前图片，第二张图片是调色后图片。请结合两张图做对比分析。"},
+                    {"type": "text", "text": "第一张图片是调整前图片，第二张图片是调整后图片。请从构图与形式构成角度做对比分析。"},
                     {"type": "image_url", "image_url": {"url": before_image_data_url}},
                     {"type": "image_url", "image_url": {"url": after_image_data_url}},
                     {"type": "text", "text": prompt},
@@ -89,5 +88,5 @@ def analyze_color_with_qwen(
     content = completion.choices[0].message.content
     if not content:
         raise RuntimeError("qwen returned empty content")
-    logger.info("Qwen analysis generated successfully")
+    logger.info("Qwen composition analysis generated successfully")
     return content.strip()

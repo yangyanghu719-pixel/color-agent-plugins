@@ -5,18 +5,13 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.schemas.request_models import AnalyzeRequest, RecolorRequest, SegmentRequest
-from app.schemas.response_models import AnalyzeResponse, HealthResponse, RecolorResponse, SegmentResponse
-from app.services.analyze_service import AnalyzeService
-from app.services.recolor_service import RecolorService
-from app.services.segment_service import SegmentService
+from app.schemas.response_models import HealthResponse
 
-app = FastAPI(title="Color Agent Web App API", version="0.2.0")
+app = FastAPI(title="Composition Lab API", version="0.3.0")
 
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -24,26 +19,9 @@ def health() -> dict:
     return {"status": "ok", "message": "service is running"}
 
 
-@app.post("/segment", response_model=SegmentResponse)
-def segment(payload: SegmentRequest) -> dict:
-    return SegmentService.segment_colors(payload)
-
-
-@app.post("/recolor", response_model=RecolorResponse)
-def recolor(payload: RecolorRequest) -> dict:
-    return RecolorService.recolor(payload)
-
-
-@app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(payload: AnalyzeRequest) -> dict:
-    return AnalyzeService.analyze(payload)
-
-
-
-
-@app.get("/experiment", response_class=HTMLResponse)
-def experiment() -> HTMLResponse:
-    html = Path("app/templates/experiment.html").read_text(encoding="utf-8")
+@app.get("/composition", response_class=HTMLResponse)
+def composition() -> HTMLResponse:
+    html = Path("app/templates/composition.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 
@@ -72,10 +50,10 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
     return {
         "status": "success",
         "message": "图片上传成功",
-        # canonical URL fields
         "original_image_url": str(save_path),
         "original_image_display_url": display_url,
-        # backward-compatible fields
+        "current_image_url": str(save_path),
+        "current_image_display_url": display_url,
         "image_url": str(save_path),
         "display_url": display_url,
     }
