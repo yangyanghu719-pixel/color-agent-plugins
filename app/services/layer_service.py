@@ -100,7 +100,15 @@ class LayerService:
         try:
             masks = ReplicateSegmentService.segment_objects(str(out / "processed_original.png"), objects)
         except Exception as e:
-            return {"status":"error","message":f"Replicate grounded_sam 调用失败：{e}","image_id":image_id,"fallback_used":True,"segmentation_method":"replicate_grounded_sam","inpainting_used":False,"inpainting_fallback_used":True,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":processed_original_url,"background_url":processed_original_url,"canvas":{"width":img.width,"height":img.height},"layers":[]}
+            replicate_model = os.getenv("REPLICATE_GROUNDED_SAM_MODEL", "schananas/grounded_sam")
+            replicate_version = os.getenv("REPLICATE_GROUNDED_SAM_VERSION")
+            replicate_model_ref = None
+            try:
+                replicate_model_ref, _, _ = ReplicateSegmentService.build_replicate_model_ref()
+            except Exception:
+                replicate_model_ref = None
+            err_detail = str(e)
+            return {"status":"error","message":f"Replicate grounded_sam 调用失败：{err_detail}","image_id":image_id,"fallback_used":True,"segmentation_method":"replicate_grounded_sam","inpainting_used":False,"inpainting_fallback_used":True,"original_image_url":image_url,"processed_original_url":processed_original_url,"clean_background_url":processed_original_url,"background_url":processed_original_url,"canvas":{"width":img.width,"height":img.height},"layers":[],"segmentation_debug":{"replicate_model":replicate_model,"replicate_version":replicate_version,"replicate_model_ref":replicate_model_ref,"prompt":None,"input_keys":[],"raw_output_type":None,"raw_output_preview":None,"error_type":type(e).__name__,"error_message":err_detail}}
 
         layers=[]
         segmentation_debug = {"items": []}
@@ -115,6 +123,14 @@ class LayerService:
                 "name": item["object"].get("name"),
                 "label_en": item["object"].get("label_en"),
                 "prompt": item.get("prompt"),
+                "replicate_model": item.get("replicate_model"),
+                "replicate_version": item.get("replicate_version"),
+                "replicate_model_ref": item.get("replicate_model_ref"),
+                "input_keys": item.get("input_keys"),
+                "raw_output_type": item.get("raw_output_type"),
+                "raw_output_preview": item.get("raw_output_preview"),
+                "error_type": None,
+                "error_message": None,
                 "mask_output_url": item.get("mask_output"),
                 "bbox": bbox,
                 "coverage": coverage,

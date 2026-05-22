@@ -11,6 +11,21 @@ from PIL import Image
 
 class ReplicateSegmentService:
     @staticmethod
+    def build_replicate_model_ref() -> tuple[str, str, str | None]:
+        model = os.getenv("REPLICATE_GROUNDED_SAM_MODEL", "schananas/grounded_sam").strip()
+        version = (os.getenv("REPLICATE_GROUNDED_SAM_VERSION") or "").strip() or None
+        if model.startswith("http://") or model.startswith("https://"):
+            raise ValueError("REPLICATE_GROUNDED_SAM_MODEL should be owner/model, not API page URL")
+        if ":" in model:
+            return model, model.split(":", 1)[0], model.split(":", 1)[1] or None
+        if version and len(version) != 64:
+            raise ValueError("REPLICATE_GROUNDED_SAM_VERSION must be full 64-character version id")
+        if model == "schananas/grounded_sam" and not version:
+            raise ValueError("community model schananas/grounded_sam requires REPLICATE_GROUNDED_SAM_VERSION")
+        model_ref = f"{model}:{version}" if version else model
+        return model_ref, model, version
+
+    @staticmethod
     def _load_mask_from_output(output: Any) -> Image.Image:
         parsed = ReplicateSegmentService.parse_grounded_sam_output(output)
         if parsed.get("mask_url"):
@@ -58,8 +73,7 @@ class ReplicateSegmentService:
 
     @staticmethod
     def segment_objects(image_path: str, objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        model = os.getenv("REPLICATE_GROUNDED_SAM_MODEL", "schananas/grounded_sam")
-        version = os.getenv("REPLICATE_GROUNDED_SAM_VERSION")
+        model_ref, model_name, model_version = ReplicateSegmentService.build_replicate_model_ref()
 
         with Path(image_path).open("rb") as f:
             img_bytes = f.read()
@@ -77,14 +91,18 @@ class ReplicateSegmentService:
                 "negative_mask_prompt": "",
                 "adjustment_factor": 0,
             }
-            if version:
-                output = client.run(f"{model}:{version}", input=inputs)
-            else:
-                output = client.run(model, input=inputs)
+            output = client.run(model_ref, input=inputs)
             parsed = ReplicateSegmentService.parse_grounded_sam_output(output)
+            raw_output_preview = str(output)[:500]
             masks.append({
                 "object": obj,
                 "prompt": prompt,
+                "replicate_model": model_name,
+                "replicate_version": model_version,
+                "replicate_model_ref": model_ref,
+                "input_keys": sorted(list(inputs.keys())),
+                "raw_output_type": type(output).__name__,
+                "raw_output_preview": raw_output_preview,
                 "mask_output": parsed.get("mask_url"),
                 "mask": ReplicateSegmentService._load_mask_from_output(output),
             })
