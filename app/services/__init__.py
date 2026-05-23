@@ -1,1 +1,1 @@
-"""Service layer package."""
+"""Service layer package for composition baseline."""
