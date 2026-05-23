@@ -1,24 +1,12 @@
-# Color Agent Web App
+# Composition Lab / 构图测试实验台
 
-Color Agent Web App 是一个面向设计学生的图像色彩调整与分析 Web 应用。
+Composition Lab / 构图测试实验台 是一个面向设计学生的纯构图实验台 baseline。
 
-## 当前核心流程
-
-1. 上传图片
-2. 提取主要色块
-3. 选择色块
-4. 使用 HSL 调整颜色
-5. 生成调整后图片
-6. 基于原图与调整后图进行色彩分析
-7. 后续接入固定任务型图像分析 Agent
-
-## 当前已有功能
+## 当前功能
 
 - `GET /health`
-- `POST /segment`
-- `POST /recolor`
-- `POST /analyze`
-- `GET /experiment`
+- `POST /upload-image`
+- `GET /composition`
 
 ## 本地运行
 
@@ -36,44 +24,10 @@ uvicorn app.main:app --reload
 
 ### 3) 打开实验台
 
-访问：`http://127.0.0.1:8000/experiment`
+访问：`http://127.0.0.1:8000/composition`
 
 ## 测试
 
 ```bash
 pytest -q
 ```
-
-## 部署说明
-
-这是一个标准 FastAPI Web App，可直接部署到 Render 或其他 Python Web 服务平台（如 Fly.io、Railway、自托管 Docker/K8s）。
-
-## API 调用概览
-
-- `/segment`：输入图片并生成主色区域、mask 和标注结果。
-- `/recolor`：基于选定区域做像素级 HSL 调整，输出新的实验图。
-- `/analyze`：输入调色前后区域信息和图片链接，输出结构化分析建议。
-
-## 下一步计划
-
-- 新增 `/vision-analyze`
-- 接入视觉大模型
-- 将分析结果卡片化展示在前台
-- 优化设计学院作品级 UI
-
-
-## Analyze 接口升级（图像分析主入口）
-- `/analyze` 现已升级为图像分析主入口：同时读取 before/after 图片与色块结构数据，调用 Qwen 生成结构化学习反馈。
-- 规则分析仍保留：作为模型提示辅助上下文，并在模型不可用时自动 fallback。
-- ⚠️ `VISION_MODEL_API_KEY`、`VISION_MODEL_BASE_URL`、`VISION_MODEL_NAME` 仅为历史方案，当前 `/analyze` 不再依赖。
-
-> 色彩数值分析（色相/饱和度/明度等）由本地算法完成；视觉模型主要负责中文教学解释与学习建议。
-
-
-## 阿里云百炼 Qwen 配置（/analyze）
-
-- 当前 `/analyze` 会先执行规则引擎分析，再尝试用 **qwen3.5-flash** 生成中文教学风格增强说明（`learning_explanation`）。
-- Render 当前仅需配置：`DASHSCOPE_API_KEY`。
-- 使用的 OpenAI 兼容端点：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
-- 说明：该 `base_url` 是 API 地址，不是网页；浏览器直接打开显示 `Not Found` 属于正常现象。
-- 若未配置 `DASHSCOPE_API_KEY` 或模型调用失败，接口会自动降级为纯规则分析结果，不影响 `/analyze` 成功返回。
