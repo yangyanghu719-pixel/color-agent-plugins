@@ -25,6 +25,7 @@ class ExtractDebug(BaseModel):
     debug_mask_url: str
     debug_overlay_url: str
     warnings: list[str]
+    extraction_stats: dict
 
 
 class ExtractElementsResponse(BaseModel):
