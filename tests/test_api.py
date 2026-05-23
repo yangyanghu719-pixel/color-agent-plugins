@@ -22,6 +22,17 @@ def _create_white_abstract_image(path: Path) -> None:
     img.save(path)
 
 
+def _create_color_element_image(path: Path) -> None:
+    img = Image.new("RGB", (520, 420), "white")
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([40, 40, 160, 160], fill=(220, 20, 60))
+    draw.ellipse([210, 60, 330, 180], fill=(40, 90, 230))
+    draw.rectangle([360, 70, 490, 180], fill=(25, 160, 70))
+    draw.rectangle([80, 220, 210, 340], fill=(20, 20, 20))
+    draw.line([260, 250, 500, 370], fill=(20, 20, 20), width=8)
+    img.save(path)
+
+
 def test_health():
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -66,8 +77,8 @@ def test_upload_image_success(tmp_path):
 
 
 def test_extract_elements_success(tmp_path):
-    image_path = tmp_path / "white-abstract.png"
-    _create_white_abstract_image(image_path)
+    image_path = tmp_path / "color-elements.png"
+    _create_color_element_image(image_path)
 
     with image_path.open("rb") as f:
         up_resp = client.post("/upload-image", files={"file": ("white-abstract.png", f, "image/png")})
@@ -82,8 +93,9 @@ def test_extract_elements_success(tmp_path):
     body = resp.json()
 
     assert body["status"] == "success"
-    assert body["layer_count"] >= 2
+    assert body["layer_count"] >= 4
     assert body["layers"]
+    assert sum(1 for x in body["layers"] if x["type"] == "solid_shape") >= 2
 
     for layer in body["layers"]:
         assert layer["image_url"]
@@ -95,6 +107,14 @@ def test_extract_elements_success(tmp_path):
         mask_file = Path(layer["mask_url"].lstrip("/"))
         assert layer_file.exists()
         assert mask_file.exists()
+        if layer["type"] == "unknown":
+            x, y, bw, bh = layer["bbox"]
+            assert (bw * bh) / (body["canvas_width"] * body["canvas_height"]) < 0.85
+
+    if any(x["type"] == "large_group" for x in body["layers"]):
+        assert body["debug"]["warnings"]
 
     debug_mask_file = Path(body["debug"]["debug_mask_url"].lstrip("/"))
+    debug_overlay_file = Path(body["debug"]["debug_overlay_url"].lstrip("/"))
     assert debug_mask_file.exists()
+    assert debug_overlay_file.exists()

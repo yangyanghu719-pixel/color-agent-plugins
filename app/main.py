@@ -87,6 +87,14 @@ def composition_extract_elements(payload: ExtractElementsRequest) -> dict:
                 "debug_mask_url": "",
                 "debug_overlay_url": "",
                 "warnings": [str(exc)],
+                "extraction_stats": {
+                    "raw_component_count": 0,
+                    "kept_component_count": 0,
+                    "ignored_noise_count": 0,
+                    "small_group_count": 0,
+                    "oversized_component_count": 0,
+                    "color_bucket_count": 0,
+                },
             },
         }
 

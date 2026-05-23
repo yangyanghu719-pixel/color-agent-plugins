@@ -63,38 +63,10 @@ class ElementExtractService:
         val = cmax
         return cmax, sat, val
 
-    def extract(self, image_url: str, cfg: ExtractConfig) -> dict:
-        image_path, display_image_url = self._resolve_image_path(image_url)
-        image_id = uuid4().hex[:12]
-        out_dir = self.static_dir / "outputs" / image_id
-        layers_dir = out_dir / "layers"
-        layers_dir.mkdir(parents=True, exist_ok=True)
-
-        rgb_img = Image.open(image_path).convert("RGB")
-        rgb = np.array(rgb_img)
-        h, w, _ = rgb.shape
-
-        bg = self._estimate_background(rgb)
-        diff = np.sqrt(((rgb.astype(np.float32) - bg.reshape(1, 1, 3)) ** 2).sum(axis=-1))
-        _, sat, val = self._rgb_to_hsv(rgb)
-        bg_sat = float(np.median(sat[: max(1, h // 20), :]))
-        bg_val = float(np.median(val[: max(1, h // 20), :]))
-
-        fg = (diff > 28) | (val < max(0.90, bg_val - 0.06)) | (sat > max(0.18, bg_sat + 0.08))
-        fg_mask = (fg.astype(np.uint8)) * 255
-
-        mask_img = Image.fromarray(fg_mask, mode="L")
-        mask_img = mask_img.filter(ImageFilter.MedianFilter(size=3))
-        arr = np.array(mask_img) > 0
-        # tiny component suppression + neighborhood smooth
-        kernel = np.ones((3, 3), dtype=np.uint8)
-        padded = np.pad(arr.astype(np.uint8), 1)
-        conv = sum(padded[i : i + h, j : j + w] for i in range(3) for j in range(3))
-        arr = conv >= 2
-
+    def _connected_components(self, arr: np.ndarray) -> list[dict]:
+        h, w = arr.shape
         visited = np.zeros((h, w), dtype=bool)
         components: list[dict] = []
-
         for y in range(h):
             for x in range(w):
                 if not arr[y, x] or visited[y, x]:
@@ -117,13 +89,72 @@ class ElementExtractService:
                 x0, x1 = min(xs), max(xs)
                 bw, bh = x1 - x0 + 1, y1 - y0 + 1
                 components.append({"pts": pts, "area": area, "bbox": (x0, y0, bw, bh)})
+        return components
+
+    def extract(self, image_url: str, cfg: ExtractConfig) -> dict:
+        image_path, display_image_url = self._resolve_image_path(image_url)
+        image_id = uuid4().hex[:12]
+        out_dir = self.static_dir / "outputs" / image_id
+        layers_dir = out_dir / "layers"
+        layers_dir.mkdir(parents=True, exist_ok=True)
+
+        rgb_img = Image.open(image_path).convert("RGB")
+        rgb = np.array(rgb_img)
+        h, w, _ = rgb.shape
+
+        bg = self._estimate_background(rgb)
+        diff = np.sqrt(((rgb.astype(np.float32) - bg.reshape(1, 1, 3)) ** 2).sum(axis=-1))
+        _, sat, val = self._rgb_to_hsv(rgb)
+        bg_sat = float(np.median(sat[: max(1, h // 20), :]))
+        bg_val = float(np.median(val[: max(1, h // 20), :]))
+
+        fg = (diff > 28) | (val < max(0.90, bg_val - 0.06)) | (sat > max(0.18, bg_sat + 0.08))
+        fg_mask = (fg.astype(np.uint8)) * 255
+        mask_img = Image.fromarray(fg_mask, mode="L")
+        mask_img = mask_img.filter(ImageFilter.MedianFilter(size=3))
+        arr = np.array(mask_img) > 0
+        padded = np.pad(arr.astype(np.uint8), 1)
+        conv = sum(padded[i : i + h, j : j + w] for i in range(3) for j in range(3))
+        arr = conv >= 2
+
+        cmax, sat, val = self._rgb_to_hsv(rgb)
+        dark_mask = arr & (val < 0.35)
+        saturated_mask = arr & (sat > 0.33) & (val >= 0.2)
+        gray_soft_mask = arr & (sat <= 0.33) & (val >= 0.35) & (val < 0.88)
+        light_line_mask = arr & (sat <= 0.20) & (val >= 0.88)
+        bucket_masks = {
+            "dark": dark_mask,
+            "saturated_color": saturated_mask,
+            "gray_soft": gray_soft_mask,
+            "light_line": light_line_mask,
+        }
+
+        components: list[dict] = []
+        for bucket_name, bucket_mask in bucket_masks.items():
+            for comp in self._connected_components(bucket_mask):
+                comp["bucket"] = bucket_name
+                components.append(comp)
 
         components.sort(key=lambda c: c["area"], reverse=True)
-        large = [c for c in components if c["area"] >= cfg.min_area]
-        small = [c for c in components if c["area"] < cfg.min_area]
+        raw_component_count = len(components)
+        min_w = max(4, int(w * 0.01))
+        min_h = max(4, int(h * 0.01))
+        noise = []
+        large = []
+        small = []
+        for c in components:
+            x0, y0, bw, bh = c["bbox"]
+            if c["area"] < cfg.min_area or bw < min_w or bh < min_h:
+                noise.append(c)
+            elif c["area"] < max(cfg.min_area * 2, 260):
+                small.append(c)
+            else:
+                large.append(c)
 
         selected = large[: cfg.max_layers]
-        leftover = small + large[cfg.max_layers :]
+        leftover = small + noise + large[cfg.max_layers :]
+        warnings: list[str] = []
+        oversized_count = 0
 
         layers = []
         full_rgba = np.dstack([rgb, np.full((h, w), 255, dtype=np.uint8)])
@@ -170,7 +201,39 @@ class ElementExtractService:
             x0, y0, bw, bh = comp["bbox"]
             density = comp["area"] / max(1, bw * bh)
             aspect = max(bw, bh) / max(1, min(bw, bh))
-            if density < 0.2 and aspect > 3:
+            bbox_cov = (bw * bh) / float(w * h)
+            is_oversized = bbox_cov > 0.25 or (bw > 0.85 * w and bh > 0.85 * h)
+            if is_oversized:
+                oversized_count += 1
+                region = arr[y0 : y0 + bh, x0 : x0 + bw]
+                sub_sat = sat[y0 : y0 + bh, x0 : x0 + bw]
+                sub_val = val[y0 : y0 + bh, x0 : x0 + bw]
+                split_masks = [
+                    region & (sub_val < 0.35),
+                    region & (sub_sat > 0.40) & (sub_val > 0.2),
+                    region & (sub_sat <= 0.25) & (sub_val >= 0.35) & (sub_val < 0.85),
+                ]
+                child_count = 0
+                for split in split_masks:
+                    sm = np.zeros((h, w), dtype=bool)
+                    sm[y0 : y0 + bh, x0 : x0 + bw] = split
+                    for subc in self._connected_components(sm):
+                        if subc["area"] < max(cfg.min_area * 2, 280):
+                            continue
+                        child_count += 1
+                        m = np.zeros((h, w), dtype=np.uint8)
+                        for py, px in subc["pts"]:
+                            m[py, px] = 1
+                        sub_density = subc["area"] / max(1, subc["bbox"][2] * subc["bbox"][3])
+                        sub_aspect = max(subc["bbox"][2], subc["bbox"][3]) / max(1, min(subc["bbox"][2], subc["bbox"][3]))
+                        ctype = "line_group" if (sub_density < 0.2 and sub_aspect > 3) else "solid_shape" if sub_density > 0.62 else "soft_texture"
+                        add_layer(m.astype(bool), f"图元 {len(layers)+1}", ctype)
+                if child_count > 0:
+                    warnings.append(f"oversized component bbox={list(comp['bbox'])}, area={comp['area']} 已拆分为 {child_count} 个子区域")
+                    continue
+                warnings.append(f"oversized component bbox={list(comp['bbox'])}, area={comp['area']} 无法拆分，fallback 为 large_group")
+                ctype = "large_group"
+            elif density < 0.2 and aspect > 3:
                 ctype = "line_group"
             elif density > 0.65:
                 ctype = "solid_shape"
@@ -227,6 +290,14 @@ class ElementExtractService:
                 "foreground_coverage": round(fg_cov, 6),
                 "debug_mask_url": f"/static/outputs/{image_id}/{debug_mask_name}",
                 "debug_overlay_url": f"/static/outputs/{image_id}/{debug_overlay_name}",
-                "warnings": [],
+                "warnings": warnings,
+                "extraction_stats": {
+                    "raw_component_count": raw_component_count,
+                    "kept_component_count": len(layers),
+                    "ignored_noise_count": len(noise),
+                    "small_group_count": len([x for x in layers if x["type"] == "small_group"]),
+                    "oversized_component_count": oversized_count,
+                    "color_bucket_count": len(bucket_masks),
+                },
             },
         }

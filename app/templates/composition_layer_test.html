@@ -27,6 +27,10 @@
 
   <h3>图元列表</h3>
   <div id="layers" class="layers"></div>
+  <h3>Warnings</h3>
+  <pre id="warnings"></pre>
+  <h3>Extraction Stats</h3>
+  <pre id="stats"></pre>
 
   <h3>原始 JSON</h3>
   <pre id="raw"></pre>
@@ -60,14 +64,21 @@ $("runBtn").onclick = async () => {
 
   const layersDom = $("layers");
   layersDom.innerHTML = "";
+  $("warnings").textContent = (data.debug.warnings || []).join("\n") || "(none)";
+  $("stats").textContent = JSON.stringify(data.debug.extraction_stats || {}, null, 2);
   data.layers.forEach((layer) => {
     const el = document.createElement("div");
     el.className = "card";
+    const risk = (layer.type === "large_group" || layer.type === "unknown")
+      ? `<div style="color:#c00;font-weight:bold;">⚠ ${layer.type}</div>`
+      : "";
     el.innerHTML = `<img src="${layer.image_url}" alt="${layer.name}" />
       <div><b>${layer.name}</b></div>
+      ${risk}
       <div>type: ${layer.type}</div>
       <div>bbox: [${layer.bbox.join(", ")}]</div>
-      <div>area: ${layer.area}</div>`;
+      <div>area: ${layer.area}</div>
+      <div>coverage: ${layer.coverage}</div>`;
     layersDom.appendChild(el);
   });
   $("status").textContent = `提取完成，共 ${data.layer_count} 层`;
