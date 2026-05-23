@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>点线面参数化渲染测试页</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:0;background:#f4f6f8}.header{padding:12px 16px;background:#1f2937;color:#fff}
+    .layout{display:grid;grid-template-columns:1.1fr 1fr .9fr;gap:12px;padding:12px}.panel{background:#fff;border-radius:8px;padding:10px}
+    textarea{width:100%;height:720px;font-family:monospace}.btns{display:flex;gap:8px;margin:8px 0}.canvas-wrap{display:flex;justify-content:center}
+    #canvas{width:800px;height:800px;border:1px solid #d1d5db;background:#fff}.item{padding:6px;border-bottom:1px solid #eee;cursor:pointer}
+    .item:hover,.item.active{background:#eff6ff}.err{color:#b91c1c;white-space:pre-wrap}.meta{font-size:13px;color:#374151}
+  </style>
+</head>
+<body>
+<div class="header"><h2>点线面参数化渲染测试页</h2></div>
+<div class="layout">
+  <div class="panel"><div class="btns"><button id="load">加载示例 JSON</button><button id="render">渲染 JSON</button><button id="clear">清空画布</button></div><textarea id="json"></textarea></div>
+  <div class="panel"><div class="meta" id="canvas-meta">canvas: 800x800, background: #FFFFFF</div><div class="canvas-wrap"><svg id="canvas" viewBox="0 0 1000 1000"></svg></div></div>
+  <div class="panel"><div class="meta">当前元素数量: <span id="count">0</span></div><h4>校验/渲染信息</h4><div id="errors" class="err"></div><h4>元素列表</h4><div id="list"></div></div>
+</div>
+<script>
+const svgNs='http://www.w3.org/2000/svg'; const known=new Set(['dot','hollow_dot','dot_grid','dot_cluster','line','polyline','curve_line','line_group','circle','ellipse','rectangle','triangle','trapezoid','grid_pattern','triangle_pattern']);
+const $=id=>document.getElementById(id);
+const seeded=(seed)=>{let h=2166136261;for(let i=0;i<seed.length;i++) h=Math.imul(h^seed.charCodeAt(i),16777619); return ()=>((h=Math.imul(h^ (h>>>15),1|h))>>>0)/4294967295};
+function nX(v,w){return v*w} function nY(v,h){return v*h}
+function create(el){return document.createElementNS(svgNs,el)}
+function setMeta(doc){$('canvas').setAttribute('viewBox',`0 0 ${doc.canvas.width} ${doc.canvas.height}`);$('canvas').style.background=doc.canvas.background;$('canvas-meta').textContent=`canvas: ${doc.canvas.width}x${doc.canvas.height}, background: ${doc.canvas.background}`}
+function tag(node,e){node.dataset.id=e.id;node.dataset.type=e.type;node.dataset.role=e.role}
+function renderElement(e,c){const w=c.width,h=c.height, sw=(v)=>Math.max(1,v*w); let node;
+ if(e.type==='dot'||e.type==='circle'){node=create('circle');node.setAttribute('cx',nX(e.x,w));node.setAttribute('cy',nY(e.y,h));node.setAttribute('r',nX(e.radius,w));node.setAttribute('fill',e.fill)}
+ else if(e.type==='hollow_dot'){node=create('circle');node.setAttribute('cx',nX(e.x,w));node.setAttribute('cy',nY(e.y,h));node.setAttribute('r',nX(e.radius,w));node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width))}
+ else if(e.type==='line'){node=create('line');node.setAttribute('x1',nX(e.x1,w));node.setAttribute('y1',nY(e.y1,h));node.setAttribute('x2',nX(e.x2,w));node.setAttribute('y2',nY(e.y2,h));node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
+ else if(e.type==='polyline'){node=create('polyline');node.setAttribute('points',e.points.map(p=>`${nX(p[0],w)},${nY(p[1],h)}`).join(' '));node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
+ else if(e.type==='curve_line'){node=create('path');const pts=e.points.map(p=>[nX(p[0],w),nY(p[1],h)]);let d=`M ${pts[0][0]} ${pts[0][1]}`;for(let i=1;i<pts.length-1;i+=2){const c1=pts[i],p2=pts[Math.min(i+1,pts.length-1)];d+=` Q ${c1[0]} ${c1[1]} ${p2[0]} ${p2[1]}`}node.setAttribute('d',d);node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
+ else if(e.type==='rectangle'){node=create('rect');node.setAttribute('x',nX(e.x,w));node.setAttribute('y',nY(e.y,h));node.setAttribute('width',nX(e.width,w));node.setAttribute('height',nY(e.height,h));node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${nX(e.x,w)+nX(e.width,w)/2},${nY(e.y,h)+nY(e.height,h)/2})`)}
+ else if(e.type==='ellipse'){node=create('ellipse');node.setAttribute('cx',nX(e.x,w)+nX(e.width,w)/2);node.setAttribute('cy',nY(e.y,h)+nY(e.height,h)/2);node.setAttribute('rx',nX(e.width,w)/2);node.setAttribute('ry',nY(e.height,h)/2);node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${nX(e.x,w)+nX(e.width,w)/2},${nY(e.y,h)+nY(e.height,h)/2})`)}
+ else if(e.type==='triangle'||e.type==='trapezoid'){node=create('polygon');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);let pts=[]; if(e.type==='triangle'){pts=[[x+ww/2,y],[x,y+hh],[x+ww,y+hh]]} else {const tw=ww*e.top_ratio;pts=[[x+(ww-tw)/2,y],[x+(ww+tw)/2,y],[x+ww,y+hh],[x,y+hh]]}node.setAttribute('points',pts.map(p=>p.join(',')).join(' '));node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${x+ww/2},${y+hh/2})`)}
+ else if(e.type==='grid_pattern'){node=create('g');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);for(let i=0;i<=e.rows;i++){let l=create('line');l.setAttribute('x1',x);l.setAttribute('y1',y+i*hh/e.rows);l.setAttribute('x2',x+ww);l.setAttribute('y2',y+i*hh/e.rows);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}for(let j=0;j<=e.cols;j++){let l=create('line');l.setAttribute('x1',x+j*ww/e.cols);l.setAttribute('y1',y);l.setAttribute('x2',x+j*ww/e.cols);l.setAttribute('y2',y+hh);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}}
+ else if(e.type==='dot_grid'||e.type==='dot_cluster'||e.type==='line_group'||e.type==='triangle_pattern'){node=create('g');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);
+  if(e.type==='dot_grid'){for(let r=0;r<e.rows;r++)for(let c2=0;c2<e.cols;c2++){let d=create('circle');d.setAttribute('cx',x+((c2+0.5)*ww/e.cols));d.setAttribute('cy',y+((r+0.5)*hh/e.rows));d.setAttribute('r',nX(e.dot_radius,w));d.setAttribute('fill',e.fill);node.appendChild(d)}}
+  if(e.type==='dot_cluster'){const rnd=seeded(e.id);for(let i=0;i<e.count;i++){let d=create('circle');const jx=(rnd()-0.5)*e.randomness*ww,jy=(rnd()-0.5)*e.randomness*hh;d.setAttribute('cx',x+rnd()*ww+jx);d.setAttribute('cy',y+rnd()*hh+jy);const rr=e.size_min+(e.size_max-e.size_min)*rnd();d.setAttribute('r',nX(rr,w));d.setAttribute('fill',e.fill);node.appendChild(d)}}
+  if(e.type==='line_group'){for(let i=0;i<e.line_count;i++){let l=create('line');const yy=y+i*(hh/Math.max(1,e.line_count-1));l.setAttribute('x1',x);l.setAttribute('y1',yy);l.setAttribute('x2',x+ww);l.setAttribute('y2',yy);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}node.setAttribute('transform',`rotate(${e.angle||0},${x+ww/2},${y+hh/2})`)}
+  if(e.type==='triangle_pattern'){const rnd=seeded(e.id);for(let i=0;i<e.count;i++){const s=(e.size_min+(e.size_max-e.size_min)*rnd())*w;const tx=x+((e.distribution==='regular')?(i%5+0.5)*(ww/5):rnd()*ww);const ty=y+((e.distribution==='regular')?(Math.floor(i/5)+0.5)*(hh/Math.ceil(e.count/5)):rnd()*hh);let p=create('polygon');p.setAttribute('points',`${tx},${ty-s/2} ${tx-s/2},${ty+s/2} ${tx+s/2},${ty+s/2}`);p.setAttribute('fill',e.fill);node.appendChild(p)}}
+ }
+ if(!node) return null; node.setAttribute('opacity',e.opacity ?? 1); tag(node,e); return node;
+}
+function renderList(elements){const list=$('list'); list.innerHTML='';elements.forEach(e=>{const div=document.createElement('div');div.className='item';div.textContent=`${e.id} | ${e.type} | ${e.role} | z=${e.z_index}`;div.onclick=()=>{document.querySelectorAll('#canvas [data-id]').forEach(n=>n.classList.remove('selected'));const t=document.querySelector(`#canvas [data-id="${e.id}"]`);if(t){t.classList.add('selected');t.setAttribute('stroke','#2563eb');t.setAttribute('stroke-width','3')}};list.appendChild(div)})}
+function clearCanvas(){$('canvas').innerHTML='';$('count').textContent='0';$('errors').textContent=''}
+async function doRender(){try{$('errors').textContent='';const payload=JSON.parse($('json').value);const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const val=await resp.json();if(!val.valid){$('errors').textContent=JSON.stringify(val.errors||val,null,2);return}clearCanvas();setMeta(payload);const els=[...(payload.elements||[])].sort((a,b)=>(a.z_index||0)-(b.z_index||0));const warnings=[];for(const e of els){if(!known.has(e.type)){warnings.push(`unknown type skipped: ${e.type}`);continue}const n=renderElement(e,payload.canvas);if(n) $('canvas').appendChild(n)}$('count').textContent=els.length;renderList(els);if(warnings.length) $('errors').textContent=warnings.join('\n')}catch(err){$('errors').textContent=`渲染失败: ${err.message}`}}
+$('render').onclick=doRender; $('clear').onclick=clearCanvas; $('load').onclick=async()=>{const r=await fetch('/static/examples/composition_param_sample.json');$('json').value=JSON.stringify(await r.json(),null,2)};
+</script>
+</body></html>

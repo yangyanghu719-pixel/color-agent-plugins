@@ -2,12 +2,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, UploadFile
+from pydantic import ValidationError
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas.request_models import ExtractElementsRequest
 from app.schemas.response_models import ExtractElementsResponse, HealthResponse
 from app.services.element_extract_service import ElementExtractService, ExtractConfig, ExtractError
+from app.schemas.composition_param_models import CompositionParamDocument
 
 app = FastAPI(title="Composition Lab API", version="0.3.0")
 
@@ -33,6 +35,36 @@ def composition_layer_test() -> HTMLResponse:
     html = Path("app/templates/composition_layer_test.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
+
+
+
+@app.get("/composition-param-test", response_class=HTMLResponse)
+def composition_param_test() -> HTMLResponse:
+    html = Path("app/templates/composition_param_test.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
+@app.post("/composition/validate-param-json")
+def validate_param_json(payload: dict) -> dict:
+    try:
+        document = CompositionParamDocument.model_validate(payload)
+        return {
+            "valid": True,
+            "message": "JSON 合法",
+            "element_count": len(document.elements),
+            "warnings": [],
+        }
+    except ValidationError as exc:
+        errors = []
+        for e in exc.errors():
+            loc = []
+            for part in e.get("loc", []):
+                if isinstance(part, int):
+                    loc[-1] = f"{loc[-1]}[{part}]"
+                else:
+                    loc.append(str(part))
+            errors.append({"path": ".".join(loc), "message": e.get("msg", "invalid")})
+        return {"valid": False, "message": "JSON 不合法", "errors": errors, "warnings": []}
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)) -> dict:
