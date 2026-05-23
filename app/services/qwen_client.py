@@ -35,8 +35,8 @@ def image_to_data_url(image_path: str) -> str:
 def analyze_composition_with_qwen(
     before_image_path: str,
     after_image_path: str,
-    color_regions: list[dict[str, Any]],
-    hsl_change: dict[str, Any],
+    composition_data: dict[str, Any],
+    composition_change: dict[str, Any],
     rule_analysis: dict[str, Any],
 ) -> str:
     api_key = os.getenv("DASHSCOPE_API_KEY")
@@ -64,7 +64,7 @@ def analyze_composition_with_qwen(
         "- 不要输出多余前言。\n"
         "- 不要编造图片中没有的信息。\n"
         "- 只围绕点线面、主体关系、视觉重心、画面均衡、节奏、层次、方向感、留白、画面张力分析。\n\n"
-        f"结构化数据如下：\n{json.dumps({'color_regions': color_regions, 'adjustment_change': hsl_change, 'rule_analysis': rule_analysis}, ensure_ascii=False, default=_json_default)}"
+        f"结构化数据如下：\n{json.dumps({'composition_data': composition_data, 'composition_change': composition_change, 'rule_analysis': rule_analysis}, ensure_ascii=False, default=_json_default)}"
     )
 
     from openai import OpenAI
