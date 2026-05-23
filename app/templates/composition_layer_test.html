@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第一阶段图元提取测试页</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #fafafa; }
+    .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .card { background:#fff; border:1px solid #ddd; border-radius:8px; padding:10px; }
+    img { max-width: 100%; height: auto; }
+    .layers { display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:10px; }
+    pre { white-space: pre-wrap; background:#111; color:#0f0; padding:8px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h1>第一阶段图元提取测试页，仅用于验证白底抽象图拆解效果。</h1>
+  <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.webp" />
+  <button id="runBtn">上传并提取</button>
+  <p id="status"></p>
+
+  <div class="row">
+    <div class="card"><h3>原图</h3><img id="srcImg" /></div>
+    <div class="card"><h3>debug foreground mask</h3><img id="maskImg" /></div>
+    <div class="card"><h3>debug overlay</h3><img id="overlayImg" /></div>
+  </div>
+
+  <h3>图元列表</h3>
+  <div id="layers" class="layers"></div>
+
+  <h3>原始 JSON</h3>
+  <pre id="raw"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+$("runBtn").onclick = async () => {
+  const file = $("fileInput").files[0];
+  if (!file) { $("status").textContent = "请先选择图片"; return; }
+  $("status").textContent = "上传中...";
+  const fd = new FormData(); fd.append("file", file);
+  const upResp = await fetch("/upload-image", { method: "POST", body: fd });
+  const upJson = await upResp.json();
+  if (upJson.status !== "success") { $("status").textContent = upJson.message || "上传失败"; return; }
+
+  const imageUrl = upJson.display_url || upJson.current_image_display_url || upJson.original_image_display_url;
+  $("srcImg").src = imageUrl;
+
+  $("status").textContent = "提取中...";
+  const exResp = await fetch("/composition/extract-elements", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ image_url: imageUrl, max_layers: 24, min_area: 80 })
+  });
+  const data = await exResp.json();
+  $("raw").textContent = JSON.stringify(data, null, 2);
+  if (data.status !== "success") { $("status").textContent = data.message || "提取失败"; return; }
+
+  $("maskImg").src = data.debug.debug_mask_url;
+  $("overlayImg").src = data.debug.debug_overlay_url;
+
+  const layersDom = $("layers");
+  layersDom.innerHTML = "";
+  data.layers.forEach((layer) => {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = `<img src="${layer.image_url}" alt="${layer.name}" />
+      <div><b>${layer.name}</b></div>
+      <div>type: ${layer.type}</div>
+      <div>bbox: [${layer.bbox.join(", ")}]</div>
+      <div>area: ${layer.area}</div>`;
+    layersDom.appendChild(el);
+  });
+  $("status").textContent = `提取完成，共 ${data.layer_count} 层`;
+};
+</script>
+</body>
+</html>

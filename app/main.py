@@ -5,13 +5,16 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.schemas.response_models import HealthResponse
+from app.schemas.request_models import ExtractElementsRequest
+from app.schemas.response_models import ExtractElementsResponse, HealthResponse
+from app.services.element_extract_service import ElementExtractService, ExtractConfig, ExtractError
 
 app = FastAPI(title="Composition Lab API", version="0.3.0")
 
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+extract_service = ElementExtractService()
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -22,6 +25,12 @@ def health() -> dict:
 @app.get("/composition", response_class=HTMLResponse)
 def composition() -> HTMLResponse:
     html = Path("app/templates/composition.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
+@app.get("/composition-layer-test", response_class=HTMLResponse)
+def composition_layer_test() -> HTMLResponse:
+    html = Path("app/templates/composition_layer_test.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 
@@ -57,6 +66,29 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
         "image_url": str(save_path),
         "display_url": display_url,
     }
+
+
+@app.post("/composition/extract-elements", response_model=ExtractElementsResponse)
+def composition_extract_elements(payload: ExtractElementsRequest) -> dict:
+    try:
+        return extract_service.extract(payload.image_url, ExtractConfig(payload.max_layers, payload.min_area))
+    except ExtractError as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "image_url": payload.image_url,
+            "canvas_width": 0,
+            "canvas_height": 0,
+            "layer_count": 0,
+            "layers": [],
+            "debug": {
+                "background_rgb": [255, 255, 255],
+                "foreground_coverage": 0.0,
+                "debug_mask_url": "",
+                "debug_overlay_url": "",
+                "warnings": [str(exc)],
+            },
+        }
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
