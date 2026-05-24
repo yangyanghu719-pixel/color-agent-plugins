@@ -62,7 +62,7 @@ def test_extract_elements_success(tmp_path):
 
 
 def _sample_json() -> dict:
-    path = Path("app/static/examples/composition_param_sample.json")
+    path = Path("static/examples/composition_param_sample.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -90,10 +90,20 @@ def test_validate_param_json_out_of_range():
     assert resp.json()["valid"] is False
 
 
+
+def test_static_sample_json_served():
+    resp = client.get("/static/examples/composition_param_sample.json")
+    assert resp.status_code == 200
+
+
 def test_sample_json_exists_and_has_required_fields():
-    path = Path("app/static/examples/composition_param_sample.json")
+    path = Path("static/examples/composition_param_sample.json")
     assert path.exists()
     payload = json.loads(path.read_text(encoding="utf-8"))
+    assert "version" in payload
+    assert "canvas" in payload
+    assert "source_summary" in payload
+    assert "elements" in payload
     assert len(payload["elements"]) >= 10
     for element in payload["elements"]:
         assert "id" in element
