@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Composition Param Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 12px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow-x: hidden;
+    }
+    .layout {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      min-width: 0;
+    }
+    .panel { border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #fff; min-width: 0; }
+    .left { width: 30%; }
+    .center { width: 40%; }
+    .right { width: 30%; }
+    textarea { width: 100%; height: 420px; font-family: ui-monospace, monospace; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: nowrap; margin-bottom: 8px; }
+    button { padding: 8px 10px; white-space: nowrap; }
+    #canvasWrap { width: 100%; overflow: hidden; }
+    #svgPreview { width: 100%; height: auto; display: block; border: 1px solid #eee; background: #fafafa; }
+    #elements, #props, #status { font-size: 14px; line-height: 1.5; word-break: break-word; }
+
+    @media (max-width: 767px) {
+      body { padding: 8px; }
+      .layout { flex-direction: column; }
+      .left, .center, .right { width: 100%; }
+      textarea { height: 220px; }
+      .toolbar { flex-wrap: wrap; }
+      button { flex: 0 0 auto; }
+      #canvasWrap, #svgPreview { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <h2>/composition-param-test</h2>
+  <div class="layout">
+    <section class="panel left">
+      <div class="toolbar">
+        <button id="loadSample">加载示例 JSON</button>
+        <button id="renderBtn">渲染 JSON</button>
+      </div>
+      <textarea id="jsonInput" placeholder="在此粘贴参数化 JSON"></textarea>
+      <div id="status"></div>
+    </section>
+
+    <section class="panel center">
+      <h3>SVG 预览</h3>
+      <div id="canvasWrap">
+        <svg id="svgPreview" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </section>
+
+    <section class="panel right">
+      <h3>元素列表</h3>
+      <div id="elements">暂无</div>
+      <h3>属性面板</h3>
+      <div id="props">点击元素查看属性</div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function loadSampleJson() {
+      const resp = await fetch('/static/examples/composition_param_sample.json');
+      if (!resp.ok) {
+        throw new Error(`加载示例失败: HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      $('jsonInput').value = JSON.stringify(data, null, 2);
+      return data;
+    }
+
+    function renderJson(parsed) {
+      const status = $('status');
+      const svg = $('svgPreview');
+      const elements = $('elements');
+      const props = $('props');
+      const data = parsed || JSON.parse($('jsonInput').value || '{}');
+
+      if (!data.canvas || !Array.isArray(data.elements)) {
+        throw new Error('JSON 缺少 canvas 或 elements 字段');
+      }
+
+      const cw = Number(data.canvas.width || 1000);
+      const ch = Number(data.canvas.height || 1000);
+      svg.setAttribute('viewBox', `0 0 ${cw} ${ch}`);
+      svg.innerHTML = '';
+
+      const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bg.setAttribute('x', '0'); bg.setAttribute('y', '0');
+      bg.setAttribute('width', String(cw)); bg.setAttribute('height', String(ch));
+      bg.setAttribute('fill', data.canvas.background || '#fff');
+      svg.appendChild(bg);
+
+      elements.innerHTML = '';
+      data.elements.forEach((el, idx) => {
+        let node;
+        if (el.type === 'rect') {
+          node = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          node.setAttribute('x', el.x || 0); node.setAttribute('y', el.y || 0);
+          node.setAttribute('width', el.width || 100); node.setAttribute('height', el.height || 100);
+        } else {
+          node = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          node.setAttribute('cx', el.cx || 200); node.setAttribute('cy', el.cy || 200);
+          node.setAttribute('r', el.r || 50);
+        }
+        node.setAttribute('fill', el.fill || '#888');
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', () => {
+          props.textContent = JSON.stringify(el, null, 2);
+        });
+        svg.appendChild(node);
+
+        const row = document.createElement('div');
+        row.textContent = `${idx + 1}. ${el.id || el.type || 'element'}`;
+        elements.appendChild(row);
+      });
+
+      status.textContent = '渲染成功';
+    }
+
+    $('loadSample').addEventListener('click', async () => {
+      try {
+        await loadSampleJson();
+        $('status').textContent = '示例 JSON 已加载';
+      } catch (err) {
+        $('status').textContent = String(err.message || err);
+      }
+    });
+
+    $('renderBtn').addEventListener('click', () => {
+      try {
+        renderJson();
+      } catch (err) {
+        $('status').textContent = `渲染失败: ${String(err.message || err)}`;
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const data = await loadSampleJson();
+        renderJson(data);
+      } catch (err) {
+        $('status').textContent = `自动加载失败: ${String(err.message || err)}`;
+      }
+    });
+  </script>
+</body>
+</html>
