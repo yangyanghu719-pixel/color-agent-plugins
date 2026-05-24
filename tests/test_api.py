@@ -143,3 +143,18 @@ def test_param_test_page_has_group_render_and_transform_logic():
     assert "type==='dot_cluster'){ node=groupWrap" in text
     assert "type==='grid_pattern'){ node=groupWrap" in text
     assert "type==='triangle_pattern'){ node=groupWrap" in text
+
+
+def test_param_test_page_has_bbox_and_svg_coordinate_resize_logic():
+    resp = client.get('/composition-param-test')
+    assert resp.status_code == 200
+    text = resp.text
+    assert 'function getElementBBox' in text
+    assert 'createSVGPoint()' in text
+    assert 'getScreenCTM()' in text
+    assert "corner==='tl'" in text
+    assert "corner==='tr'" in text
+    assert "corner==='bl'" in text
+    assert "corner==='br'" in text
+    assert "newWidth = oldRight - mouse.x" not in text  # doc string not embedded
+    assert "const signX=transformState.corner.includes('l')?-1:1;" not in text
