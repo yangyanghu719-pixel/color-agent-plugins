@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -43,6 +44,14 @@ def experiment(): return HTMLResponse(Path('app/templates/experiment.html').read
 @app.get('/layered', response_class=HTMLResponse)
 def layered(): return HTMLResponse(Path('app/templates/experiment.html').read_text(encoding='utf-8'))
 
+
+@app.get('/composition-param-test', response_class=HTMLResponse)
+def composition_param_test(): return HTMLResponse(Path('app/templates/composition_param_test.html').read_text(encoding='utf-8'))
+
+@app.post('/composition/validate-param-json')
+def composition_validate_param_json(payload: dict):
+    valid = isinstance(payload, dict) and isinstance(payload.get('canvas'), dict) and isinstance(payload.get('elements'), list)
+    return {"valid": valid, "message": "ok" if valid else "invalid schema"}
 @app.post('/upload-image')
 async def upload_image(file: UploadFile = File(...)):
     if not file.filename: return {"status":"error","message":"文件为空"}

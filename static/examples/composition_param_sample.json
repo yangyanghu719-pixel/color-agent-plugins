@@ -1,0 +1,26 @@
+{
+  "canvas": {
+    "width": 1000,
+    "height": 1000,
+    "background": "#f7f7f7"
+  },
+  "elements": [
+    {
+      "id": "rect-main",
+      "type": "rect",
+      "x": 120,
+      "y": 100,
+      "width": 420,
+      "height": 320,
+      "fill": "#f36"
+    },
+    {
+      "id": "circle-focus",
+      "type": "circle",
+      "cx": 700,
+      "cy": 360,
+      "r": 180,
+      "fill": "#36c"
+    }
+  ]
+}
