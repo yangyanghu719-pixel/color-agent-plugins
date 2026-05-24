@@ -624,7 +624,7 @@ def test_layers_decompose_needs_model_config(tmp_path, monkeypatch):
     assert body["status"] == "needs_model_config"
     assert body["layers"] == []
     assert body["model_required"] is True
-    assert "SAM" in body["message"] and "Qwen-Image-Layered" in body["message"]
+    assert "Replicate" in body["message"] and "grounded_sam" in body["message"]
 
 
 def test_manual_extract_creates_one_layer(tmp_path):
@@ -691,32 +691,34 @@ def test_experiment_contains_object_ui():
     for keyword in ['已识别到的画面对象', '提取所选对象为图层', '手动框选模式']:
         assert keyword in resp.text
 
-def test_extract_by_objects_external_mask(tmp_path, monkeypatch):
-    import base64, io
+def test_extract_by_objects_mock_replicate_without_inpaint(tmp_path, monkeypatch):
     image_path = tmp_path / 'ext.png'; _create_test_image(image_path)
-    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'external')
-    monkeypatch.setenv('OBJECT_SEGMENT_API_URL', 'http://seg')
-    monkeypatch.setenv('OBJECT_SEGMENT_API_KEY', 'k')
-    mask = Image.new('L', (320,240), 0); ImageDraw.Draw(mask).rectangle((10,10,60,80), fill=255)
-    buf=io.BytesIO(); mask.save(buf, format='PNG'); m64=base64.b64encode(buf.getvalue()).decode()
-    class R:
-        def __init__(self,d): self._d=d
-        def raise_for_status(self): pass
-        def json(self): return self._d
-    class C:
-        def __enter__(self): return self
-        def __exit__(self,*a): pass
-        def post(self,*a,**k): return R({'objects':[{'id':'object-1','name':'猫','label_en':'cat','bbox':{'x':10,'y':10,'width':50,'height':70},'mask_base64':m64,'confidence':0.9}]})
-    monkeypatch.setattr('app.services.layer_service.httpx.Client', lambda timeout=60: C())
+    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'replicate_grounded_sam')
+    monkeypatch.setenv('REPLICATE_API_TOKEN', 'fake-token')
+
+    def _mock_segment(*args, **kwargs):
+        mask = Image.new('L', (320, 240), 0)
+        ImageDraw.Draw(mask).rectangle((10, 10, 60, 80), fill=255)
+        return [{'object': {'id': 'object-1', 'name': '猫', 'label_en': 'cat'}, 'mask': mask}]
+
+    monkeypatch.setattr('app.services.layer_service.ReplicateSegmentService.segment_objects', _mock_segment)
     body = client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫','label_en':'cat'}], 'need_inpainting': False}).json()
     assert body['status'] == 'success' and body['layers'][0]['mask_url']
 
 
-def test_extract_by_objects_external_inpaint(tmp_path, monkeypatch):
+def test_extract_by_objects_mock_replicate_with_external_inpaint(tmp_path, monkeypatch):
     import base64, io
     image_path = tmp_path / 'ext2.png'; _create_test_image(image_path)
-    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'external'); monkeypatch.setenv('OBJECT_SEGMENT_API_URL', 'http://seg'); monkeypatch.setenv('INPAINT_PROVIDER', 'external'); monkeypatch.setenv('INPAINT_API_URL', 'http://inpaint')
-    mask = Image.new('L', (320,240), 255); b1=io.BytesIO(); mask.save(b1, format='PNG'); m64=base64.b64encode(b1.getvalue()).decode()
+    monkeypatch.setenv('OBJECT_SEGMENT_PROVIDER', 'replicate_grounded_sam')
+    monkeypatch.setenv('REPLICATE_API_TOKEN', 'fake-token')
+    monkeypatch.setenv('INPAINT_PROVIDER', 'external')
+    monkeypatch.setenv('INPAINT_API_URL', 'http://inpaint')
+
+    def _mock_segment(*args, **kwargs):
+        mask = Image.new('L', (320, 240), 0)
+        ImageDraw.Draw(mask).rectangle((0, 0, 319, 239), fill=255)
+        return [{'object': {'id': 'object-1', 'name': '猫', 'label_en': 'cat'}, 'mask': mask}]
+
     clean = Image.new('RGBA', (320,240), (255,255,255,255)); b2=io.BytesIO(); clean.save(b2, format='PNG'); c64=base64.b64encode(b2.getvalue()).decode()
     class R:
         def __init__(self,d): self._d=d
@@ -726,7 +728,9 @@ def test_extract_by_objects_external_inpaint(tmp_path, monkeypatch):
         def __enter__(self): return self
         def __exit__(self,*a): pass
         def post(self,url,*a,**k):
-            return R({'objects':[{'id':'object-1','name':'猫','bbox':{'x':0,'y':0,'width':320,'height':240},'mask_base64':m64}]}) if 'seg' in url else R({'clean_background_base64':c64})
+            return R({'clean_background_base64': c64})
+
+    monkeypatch.setattr('app.services.layer_service.ReplicateSegmentService.segment_objects', _mock_segment)
     monkeypatch.setattr('app.services.layer_service.httpx.Client', lambda timeout=60: C())
     body=client.post('/layers/extract-by-objects', json={'image_url': str(image_path), 'objects':[{'id':'object-1','name':'猫'}], 'need_inpainting': True}).json()
     assert body['inpainting_used'] is True and 'clean_background.png' in body['clean_background_url']
