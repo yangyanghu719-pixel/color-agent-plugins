@@ -39,7 +39,7 @@ def test_composition_param_test_page():
     resp = client.get("/composition-param-test")
     assert resp.status_code == 200
     assert "点线面参数化渲染测试页" in resp.text
-    for token in ["加载示例 JSON", "渲染 JSON", "清空画布", "删除对象", "复制对象"]:
+    for token in ["加载示例 JSON", "渲染 JSON", "清空画布", "删除对象", "复制对象", "上移一层", "下移一层", "新增对象"]:
         assert token in resp.text
 
 
@@ -137,3 +137,9 @@ def test_param_test_page_has_group_render_and_transform_logic():
     assert "dataset.handle='resize'" in text
     assert "dataset.handle='rotate'" in text
     assert "groupWrap" in text
+    assert "closest?.('[data-id]')" in text
+    assert "line_group'){ node=groupWrap" in text
+    assert "type==='dot_grid'){ node=groupWrap" in text
+    assert "type==='dot_cluster'){ node=groupWrap" in text
+    assert "type==='grid_pattern'){ node=groupWrap" in text
+    assert "type==='triangle_pattern'){ node=groupWrap" in text
