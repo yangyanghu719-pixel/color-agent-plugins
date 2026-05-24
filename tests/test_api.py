@@ -120,3 +120,20 @@ def test_param_test_page_has_add_object_controls():
     assert "新增对象" in resp.text
     for t in ["circle", "rectangle", "triangle", "line", "dot"]:
         assert t in resp.text
+
+
+def test_sample_json_contains_required_pattern_types():
+    payload = _sample_json()
+    types = {e["type"] for e in payload["elements"]}
+    for t in ["dot_grid", "line_group", "grid_pattern", "triangle_pattern"]:
+        assert t in types
+
+
+def test_param_test_page_has_group_render_and_transform_logic():
+    resp = client.get("/composition-param-test")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "dot_grid" in text and "dot_cluster" in text and "line_group" in text
+    assert "dataset.handle='resize'" in text
+    assert "dataset.handle='rotate'" in text
+    assert "groupWrap" in text
