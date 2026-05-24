@@ -5,49 +5,248 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>点线面参数化渲染测试页</title>
   <style>
-    body{font-family:Arial,sans-serif;margin:0;background:#f4f6f8}.header{padding:12px 16px;background:#1f2937;color:#fff}
-    .layout{display:grid;grid-template-columns:1.1fr 1fr .9fr;gap:12px;padding:12px}.panel{background:#fff;border-radius:8px;padding:10px}
-    textarea{width:100%;height:720px;font-family:monospace}.btns{display:flex;gap:8px;margin:8px 0}.canvas-wrap{display:flex;justify-content:center}
-    #canvas{width:800px;height:800px;border:1px solid #d1d5db;background:#fff}.item{padding:6px;border-bottom:1px solid #eee;cursor:pointer}
-    .item:hover,.item.active{background:#eff6ff}.err{color:#b91c1c;white-space:pre-wrap}.meta{font-size:13px;color:#374151}
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; }
+    .header { padding: 12px 16px; background: #1f2937; color: #fff; }
+    .layout { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 12px; padding: 12px; }
+    .panel { background: #fff; border-radius: 8px; padding: 10px; min-height: 820px; }
+    textarea { width: 100%; height: 740px; font-family: monospace; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+    .canvas-wrap { display: flex; justify-content: center; }
+    #canvas { width: 800px; height: 800px; border: 1px solid #d1d5db; background: #fff; touch-action: none; }
+    .item { padding: 6px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+    .item:hover, .item.active { background: #eff6ff; }
+    .err { color: #b91c1c; white-space: pre-wrap; font-size: 13px; }
+    .ok { color: #047857; white-space: pre-wrap; font-size: 13px; }
+    .meta { font-size: 13px; color: #374151; }
+    .section { margin-top: 12px; }
+    .form-row { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .form-row input, .form-row select { width: 100%; box-sizing: border-box; }
+    #element-list { max-height: 250px; overflow: auto; border: 1px solid #e5e7eb; }
+    #selection-overlay { pointer-events: none; }
   </style>
 </head>
 <body>
-<div class="header"><h2>点线面参数化渲染测试页</h2></div>
+<div class="header"><h2>点线面参数化渲染测试页（阶段 2 参数化编辑器原型）</h2></div>
 <div class="layout">
-  <div class="panel"><div class="btns"><button id="load">加载示例 JSON</button><button id="render">渲染 JSON</button><button id="clear">清空画布</button></div><textarea id="json"></textarea></div>
-  <div class="panel"><div class="meta" id="canvas-meta">canvas: 800x800, background: #FFFFFF</div><div class="canvas-wrap"><svg id="canvas" viewBox="0 0 1000 1000"></svg></div></div>
-  <div class="panel"><div class="meta">当前元素数量: <span id="count">0</span></div><h4>校验/渲染信息</h4><div id="errors" class="err"></div><h4>元素列表</h4><div id="list"></div></div>
+  <div class="panel">
+    <div class="btns">
+      <button id="load">加载示例 JSON</button>
+      <button id="render">渲染 JSON</button>
+      <button id="clear">清空画布</button>
+      <button id="apply">应用当前文本 JSON</button>
+    </div>
+    <textarea id="json"></textarea>
+  </div>
+
+  <div class="panel">
+    <div class="meta" id="canvas-meta">canvas: 800x800, background: #FFFFFF</div>
+    <div class="canvas-wrap">
+      <svg id="canvas" viewBox="0 0 1000 1000">
+        <g id="scene"></g>
+        <g id="selection-overlay"></g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="meta">当前元素数量: <span id="count">0</span></div>
+    <h4>校验/渲染信息</h4>
+    <div id="errors" class="err"></div>
+    <div id="success" class="ok"></div>
+
+    <div class="section">
+      <h4>新增对象（最小版）</h4>
+      <div class="btns">
+        <select id="add-type">
+          <option value="circle">circle</option><option value="rectangle">rectangle</option>
+          <option value="triangle">triangle</option><option value="line">line</option>
+          <option value="dot">dot</option>
+        </select>
+        <button id="add-object">新增对象</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h4>元素列表</h4>
+      <div id="element-list"></div>
+    </div>
+
+    <div class="section">
+      <h4>编辑操作</h4>
+      <div class="btns">
+        <button id="delete-object">删除对象</button>
+        <button id="duplicate-object">复制对象</button>
+        <button id="bring-forward">上移一层</button>
+        <button id="send-backward">下移一层</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h4>当前选中对象属性面板</h4>
+      <div id="selection-info" class="meta">未选中对象</div>
+      <div id="property-panel"></div>
+    </div>
+  </div>
 </div>
+
 <script>
-const svgNs='http://www.w3.org/2000/svg'; const known=new Set(['dot','hollow_dot','dot_grid','dot_cluster','line','polyline','curve_line','line_group','circle','ellipse','rectangle','triangle','trapezoid','grid_pattern','triangle_pattern']);
-const $=id=>document.getElementById(id);
-const seeded=(seed)=>{let h=2166136261;for(let i=0;i<seed.length;i++) h=Math.imul(h^seed.charCodeAt(i),16777619); return ()=>((h=Math.imul(h^ (h>>>15),1|h))>>>0)/4294967295};
-function nX(v,w){return v*w} function nY(v,h){return v*h}
-function create(el){return document.createElementNS(svgNs,el)}
-function setMeta(doc){$('canvas').setAttribute('viewBox',`0 0 ${doc.canvas.width} ${doc.canvas.height}`);$('canvas').style.background=doc.canvas.background;$('canvas-meta').textContent=`canvas: ${doc.canvas.width}x${doc.canvas.height}, background: ${doc.canvas.background}`}
-function tag(node,e){node.dataset.id=e.id;node.dataset.type=e.type;node.dataset.role=e.role}
-function renderElement(e,c){const w=c.width,h=c.height, sw=(v)=>Math.max(1,v*w); let node;
- if(e.type==='dot'||e.type==='circle'){node=create('circle');node.setAttribute('cx',nX(e.x,w));node.setAttribute('cy',nY(e.y,h));node.setAttribute('r',nX(e.radius,w));node.setAttribute('fill',e.fill)}
- else if(e.type==='hollow_dot'){node=create('circle');node.setAttribute('cx',nX(e.x,w));node.setAttribute('cy',nY(e.y,h));node.setAttribute('r',nX(e.radius,w));node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width))}
- else if(e.type==='line'){node=create('line');node.setAttribute('x1',nX(e.x1,w));node.setAttribute('y1',nY(e.y1,h));node.setAttribute('x2',nX(e.x2,w));node.setAttribute('y2',nY(e.y2,h));node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
- else if(e.type==='polyline'){node=create('polyline');node.setAttribute('points',e.points.map(p=>`${nX(p[0],w)},${nY(p[1],h)}`).join(' '));node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
- else if(e.type==='curve_line'){node=create('path');const pts=e.points.map(p=>[nX(p[0],w),nY(p[1],h)]);let d=`M ${pts[0][0]} ${pts[0][1]}`;for(let i=1;i<pts.length-1;i+=2){const c1=pts[i],p2=pts[Math.min(i+1,pts.length-1)];d+=` Q ${c1[0]} ${c1[1]} ${p2[0]} ${p2[1]}`}node.setAttribute('d',d);node.setAttribute('fill','none');node.setAttribute('stroke',e.stroke);node.setAttribute('stroke-width',sw(e.stroke_width));if(e.style==='dashed')node.setAttribute('stroke-dasharray','10,8')}
- else if(e.type==='rectangle'){node=create('rect');node.setAttribute('x',nX(e.x,w));node.setAttribute('y',nY(e.y,h));node.setAttribute('width',nX(e.width,w));node.setAttribute('height',nY(e.height,h));node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${nX(e.x,w)+nX(e.width,w)/2},${nY(e.y,h)+nY(e.height,h)/2})`)}
- else if(e.type==='ellipse'){node=create('ellipse');node.setAttribute('cx',nX(e.x,w)+nX(e.width,w)/2);node.setAttribute('cy',nY(e.y,h)+nY(e.height,h)/2);node.setAttribute('rx',nX(e.width,w)/2);node.setAttribute('ry',nY(e.height,h)/2);node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${nX(e.x,w)+nX(e.width,w)/2},${nY(e.y,h)+nY(e.height,h)/2})`)}
- else if(e.type==='triangle'||e.type==='trapezoid'){node=create('polygon');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);let pts=[]; if(e.type==='triangle'){pts=[[x+ww/2,y],[x,y+hh],[x+ww,y+hh]]} else {const tw=ww*e.top_ratio;pts=[[x+(ww-tw)/2,y],[x+(ww+tw)/2,y],[x+ww,y+hh],[x,y+hh]]}node.setAttribute('points',pts.map(p=>p.join(',')).join(' '));node.setAttribute('fill',e.fill);node.setAttribute('transform',`rotate(${e.rotation||0},${x+ww/2},${y+hh/2})`)}
- else if(e.type==='grid_pattern'){node=create('g');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);for(let i=0;i<=e.rows;i++){let l=create('line');l.setAttribute('x1',x);l.setAttribute('y1',y+i*hh/e.rows);l.setAttribute('x2',x+ww);l.setAttribute('y2',y+i*hh/e.rows);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}for(let j=0;j<=e.cols;j++){let l=create('line');l.setAttribute('x1',x+j*ww/e.cols);l.setAttribute('y1',y);l.setAttribute('x2',x+j*ww/e.cols);l.setAttribute('y2',y+hh);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}}
- else if(e.type==='dot_grid'||e.type==='dot_cluster'||e.type==='line_group'||e.type==='triangle_pattern'){node=create('g');const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h);
-  if(e.type==='dot_grid'){for(let r=0;r<e.rows;r++)for(let c2=0;c2<e.cols;c2++){let d=create('circle');d.setAttribute('cx',x+((c2+0.5)*ww/e.cols));d.setAttribute('cy',y+((r+0.5)*hh/e.rows));d.setAttribute('r',nX(e.dot_radius,w));d.setAttribute('fill',e.fill);node.appendChild(d)}}
-  if(e.type==='dot_cluster'){const rnd=seeded(e.id);for(let i=0;i<e.count;i++){let d=create('circle');const jx=(rnd()-0.5)*e.randomness*ww,jy=(rnd()-0.5)*e.randomness*hh;d.setAttribute('cx',x+rnd()*ww+jx);d.setAttribute('cy',y+rnd()*hh+jy);const rr=e.size_min+(e.size_max-e.size_min)*rnd();d.setAttribute('r',nX(rr,w));d.setAttribute('fill',e.fill);node.appendChild(d)}}
-  if(e.type==='line_group'){for(let i=0;i<e.line_count;i++){let l=create('line');const yy=y+i*(hh/Math.max(1,e.line_count-1));l.setAttribute('x1',x);l.setAttribute('y1',yy);l.setAttribute('x2',x+ww);l.setAttribute('y2',yy);l.setAttribute('stroke',e.stroke);l.setAttribute('stroke-width',sw(e.stroke_width));node.appendChild(l)}node.setAttribute('transform',`rotate(${e.angle||0},${x+ww/2},${y+hh/2})`)}
-  if(e.type==='triangle_pattern'){const rnd=seeded(e.id);for(let i=0;i<e.count;i++){const s=(e.size_min+(e.size_max-e.size_min)*rnd())*w;const tx=x+((e.distribution==='regular')?(i%5+0.5)*(ww/5):rnd()*ww);const ty=y+((e.distribution==='regular')?(Math.floor(i/5)+0.5)*(hh/Math.ceil(e.count/5)):rnd()*hh);let p=create('polygon');p.setAttribute('points',`${tx},${ty-s/2} ${tx-s/2},${ty+s/2} ${tx+s/2},${ty+s/2}`);p.setAttribute('fill',e.fill);node.appendChild(p)}}
- }
- if(!node) return null; node.setAttribute('opacity',e.opacity ?? 1); tag(node,e); return node;
+const svgNs = 'http://www.w3.org/2000/svg';
+const $ = (id) => document.getElementById(id);
+const known = new Set(['dot','hollow_dot','dot_grid','dot_cluster','line','polyline','curve_line','line_group','circle','ellipse','rectangle','triangle','trapezoid','grid_pattern','triangle_pattern']);
+let documentState = null;
+let selectedId = null;
+let dragState = null;
+
+const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
+const num = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
+const create = (el) => document.createElementNS(svgNs, el);
+const nX = (v,w) => v*w; const nY = (v,h) => v*h;
+const sw = (v,w) => Math.max(1, num(v,0.001) * w);
+
+function deepCopy(v){ return JSON.parse(JSON.stringify(v)); }
+function getElementsSorted(){ return [...(documentState?.elements || [])].sort((a,b)=>num(a.z_index)-num(b.z_index)); }
+function getSelected(){ return (documentState?.elements || []).find(e => e.id === selectedId) || null; }
+function genId(prefix='el'){ return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; }
+function updateTextarea(){ if(documentState){ $('json').value = JSON.stringify(documentState, null, 2); } }
+function setMessage(ok, err=''){ $('success').textContent = ok || ''; $('errors').textContent = err || ''; }
+
+function setMeta(doc){
+  $('canvas').setAttribute('viewBox',`0 0 ${doc.canvas.width} ${doc.canvas.height}`);
+  $('canvas').style.background = doc.canvas.background;
+  $('canvas-meta').textContent = `canvas: ${doc.canvas.width}x${doc.canvas.height}, background: ${doc.canvas.background}`;
 }
-function renderList(elements){const list=$('list'); list.innerHTML='';elements.forEach(e=>{const div=document.createElement('div');div.className='item';div.textContent=`${e.id} | ${e.type} | ${e.role} | z=${e.z_index}`;div.onclick=()=>{document.querySelectorAll('#canvas [data-id]').forEach(n=>n.classList.remove('selected'));const t=document.querySelector(`#canvas [data-id="${e.id}"]`);if(t){t.classList.add('selected');t.setAttribute('stroke','#2563eb');t.setAttribute('stroke-width','3')}};list.appendChild(div)})}
-function clearCanvas(){$('canvas').innerHTML='';$('count').textContent='0';$('errors').textContent=''}
-async function doRender(){try{$('errors').textContent='';const payload=JSON.parse($('json').value);const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const val=await resp.json();if(!val.valid){$('errors').textContent=JSON.stringify(val.errors||val,null,2);return}clearCanvas();setMeta(payload);const els=[...(payload.elements||[])].sort((a,b)=>(a.z_index||0)-(b.z_index||0));const warnings=[];for(const e of els){if(!known.has(e.type)){warnings.push(`unknown type skipped: ${e.type}`);continue}const n=renderElement(e,payload.canvas);if(n) $('canvas').appendChild(n)}$('count').textContent=els.length;renderList(els);if(warnings.length) $('errors').textContent=warnings.join('\n')}catch(err){$('errors').textContent=`渲染失败: ${err.message}`}}
-$('render').onclick=doRender; $('clear').onclick=clearCanvas; $('load').onclick=async()=>{const r=await fetch('/static/examples/composition_param_sample.json');$('json').value=JSON.stringify(await r.json(),null,2)};
+
+function tag(node, e){ node.dataset.id = e.id; }
+function maybeRotate(node, e, cx, cy){ if(e.rotation !== undefined){ node.setAttribute('transform', `rotate(${num(e.rotation)},${cx},${cy})`);} }
+
+function makeShapeNode(e,c){
+  const w=c.width, h=c.height; let node=null;
+  if(e.type==='dot'||e.type==='circle'){ node=create('circle'); node.setAttribute('cx',nX(e.x,w)); node.setAttribute('cy',nY(e.y,h)); node.setAttribute('r',nX(e.radius,w)); node.setAttribute('fill',e.fill||'#000'); }
+  else if(e.type==='hollow_dot'){ node=create('circle'); node.setAttribute('cx',nX(e.x,w)); node.setAttribute('cy',nY(e.y,h)); node.setAttribute('r',nX(e.radius,w)); node.setAttribute('fill','none'); node.setAttribute('stroke',e.stroke||'#000'); node.setAttribute('stroke-width',sw(e.stroke_width,w)); }
+  else if(e.type==='line'){ node=create('line'); node.setAttribute('x1',nX(e.x1,w)); node.setAttribute('y1',nY(e.y1,h)); node.setAttribute('x2',nX(e.x2,w)); node.setAttribute('y2',nY(e.y2,h)); node.setAttribute('stroke',e.stroke||'#000'); node.setAttribute('stroke-width',sw(e.stroke_width,w)); if(e.style==='dashed') node.setAttribute('stroke-dasharray','10,8'); }
+  else if(e.type==='polyline'){ node=create('polyline'); node.setAttribute('points',(e.points||[]).map(p=>`${nX(p[0],w)},${nY(p[1],h)}`).join(' ')); node.setAttribute('fill','none'); node.setAttribute('stroke',e.stroke||'#000'); node.setAttribute('stroke-width',sw(e.stroke_width,w)); if(e.style==='dashed') node.setAttribute('stroke-dasharray','10,8'); }
+  else if(e.type==='curve_line'){ node=create('path'); const pts=(e.points||[]).map(p=>[nX(p[0],w),nY(p[1],h)]); if(pts.length<2) return null; let d=`M ${pts[0][0]} ${pts[0][1]}`; for(let i=1;i<pts.length-1;i+=2){const c1=pts[i], p2=pts[Math.min(i+1,pts.length-1)]; d += ` Q ${c1[0]} ${c1[1]} ${p2[0]} ${p2[1]}`; } node.setAttribute('d',d); node.setAttribute('fill','none'); node.setAttribute('stroke',e.stroke||'#000'); node.setAttribute('stroke-width',sw(e.stroke_width,w)); if(e.style==='dashed') node.setAttribute('stroke-dasharray','10,8'); }
+  else if(e.type==='rectangle'){ const x=nX(e.x,w), y=nY(e.y,h), ww=nX(e.width,w), hh=nY(e.height,h); node=create('rect'); node.setAttribute('x',x);node.setAttribute('y',y);node.setAttribute('width',ww);node.setAttribute('height',hh);node.setAttribute('fill',e.fill||'#000'); maybeRotate(node,e,x+ww/2,y+hh/2);}
+  else if(e.type==='ellipse'){ const x=nX(e.x,w), y=nY(e.y,h), ww=nX(e.width,w), hh=nY(e.height,h); node=create('ellipse'); node.setAttribute('cx',x+ww/2);node.setAttribute('cy',y+hh/2);node.setAttribute('rx',ww/2);node.setAttribute('ry',hh/2);node.setAttribute('fill',e.fill||'#000'); maybeRotate(node,e,x+ww/2,y+hh/2);}
+  else if(e.type==='triangle'||e.type==='trapezoid'){ const x=nX(e.x,w),y=nY(e.y,h),ww=nX(e.width,w),hh=nY(e.height,h); node=create('polygon'); let pts=[]; if(e.type==='triangle'){pts=[[x+ww/2,y],[x,y+hh],[x+ww,y+hh]];} else {const tr= num(e.top_ratio,0.6); const tw=ww*tr; pts=[[x+(ww-tw)/2,y],[x+(ww+tw)/2,y],[x+ww,y+hh],[x,y+hh]];} node.setAttribute('points',pts.map(p=>p.join(',')).join(' ')); node.setAttribute('fill',e.fill||'#000'); maybeRotate(node,e,x+ww/2,y+hh/2);}
+  else if(['dot_grid','dot_cluster','line_group','grid_pattern','triangle_pattern'].includes(e.type)){ node=create('rect'); node.setAttribute('x',nX(e.x,w)); node.setAttribute('y',nY(e.y,h)); node.setAttribute('width',nX(e.width,w)); node.setAttribute('height',nY(e.height,h)); node.setAttribute('fill','rgba(59,130,246,0.08)'); node.setAttribute('stroke','rgba(30,64,175,0.4)'); }
+  if(node){ node.setAttribute('opacity',num(e.opacity,1)); tag(node,e); }
+  return node;
+}
+
+function renderAll(){
+  const scene = $('scene'); scene.innerHTML=''; $('selection-overlay').innerHTML='';
+  if(!documentState){ $('count').textContent='0'; return; }
+  setMeta(documentState);
+  const sorted=getElementsSorted();
+  sorted.forEach(e=>{ if(known.has(e.type)){ const n=makeShapeNode(e,documentState.canvas); if(n) scene.appendChild(n);} });
+  $('count').textContent = String(sorted.length);
+  renderList(); renderSelectionOverlay(); renderPropertyPanel();
+}
+
+function renderList(){
+  const list=$('element-list'); list.innerHTML='';
+  getElementsSorted().forEach(e=>{ const div=document.createElement('div'); div.className='item'+(e.id===selectedId?' active':''); div.textContent=`${e.id} | ${e.type} | ${e.role} | z=${e.z_index}`; div.onclick=()=>setSelected(e.id); list.appendChild(div); });
+}
+
+function selectionBBox(e){
+  if(!documentState) return null; const c=documentState.canvas, w=c.width, h=c.height;
+  if(['dot','circle','hollow_dot'].includes(e.type)){ const r=nX(e.radius,w); return {x:nX(e.x,w)-r,y:nY(e.y,h)-r,w:r*2,h:r*2}; }
+  if(['rectangle','ellipse','triangle','trapezoid','dot_grid','dot_cluster','line_group','grid_pattern','triangle_pattern'].includes(e.type)){ return {x:nX(e.x,w),y:nY(e.y,h),w:nX(e.width,w),h:nY(e.height,h)}; }
+  if(e.type==='line'){ const x1=nX(e.x1,w),y1=nY(e.y1,h),x2=nX(e.x2,w),y2=nY(e.y2,h); return {x:Math.min(x1,x2),y:Math.min(y1,y2),w:Math.abs(x1-x2),h:Math.abs(y1-y2)}; }
+  if(['polyline','curve_line'].includes(e.type)){ const pts=(e.points||[]).map(p=>[nX(p[0],w),nY(p[1],h)]); if(!pts.length) return null; const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]); return {x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys)}; }
+  return null;
+}
+function renderSelectionOverlay(){
+  const g=$('selection-overlay'); g.innerHTML=''; const e=getSelected(); if(!e) return;
+  const box=selectionBBox(e); if(!box) return;
+  const r=create('rect'); r.setAttribute('x',box.x-4); r.setAttribute('y',box.y-4); r.setAttribute('width',Math.max(8,box.w+8)); r.setAttribute('height',Math.max(8,box.h+8)); r.setAttribute('fill','none'); r.setAttribute('stroke','rgba(37,99,235,0.9)'); r.setAttribute('stroke-width','3'); r.setAttribute('stroke-dasharray','8,5'); g.appendChild(r);
+}
+
+function setSelected(id){ selectedId=id; renderAll(); }
+function syncAndRender(){ updateTextarea(); renderAll(); }
+
+function updateElementById(id, updater){ if(!documentState) return; const i=documentState.elements.findIndex(e=>e.id===id); if(i<0) return; updater(documentState.elements[i]); }
+
+function applyDrag(id, dx, dy){
+  const c=documentState.canvas; const nx=dx/c.width, ny=dy/c.height;
+  updateElementById(id, (e)=>{
+    if(['dot','hollow_dot','circle'].includes(e.type)){ e.x=clamp01(num(e.x)+nx); e.y=clamp01(num(e.y)+ny); }
+    else if(['ellipse','rectangle','triangle','trapezoid','dot_grid','dot_cluster','line_group','grid_pattern','triangle_pattern'].includes(e.type)){ e.x=clamp01(num(e.x)+nx); e.y=clamp01(num(e.y)+ny); }
+    else if(e.type==='line'){ e.x1=clamp01(num(e.x1)+nx); e.y1=clamp01(num(e.y1)+ny); e.x2=clamp01(num(e.x2)+nx); e.y2=clamp01(num(e.y2)+ny); }
+    else if(['polyline','curve_line'].includes(e.type)){ e.points=(e.points||[]).map(p=>[clamp01(num(p[0])+nx),clamp01(num(p[1])+ny)]); }
+  });
+}
+
+function bindCanvasInteractions(){
+  const svg=$('canvas');
+  svg.addEventListener('pointerdown',(ev)=>{
+    const id = ev.target?.dataset?.id;
+    if(!id){ selectedId=null; renderAll(); return; }
+    setSelected(id); dragState={id,startX:ev.clientX,startY:ev.clientY}; svg.setPointerCapture(ev.pointerId);
+  });
+  svg.addEventListener('pointermove',(ev)=>{
+    if(!dragState || !documentState) return;
+    const dx=ev.clientX-dragState.startX, dy=ev.clientY-dragState.startY;
+    if(Math.abs(dx)+Math.abs(dy)<1) return;
+    applyDrag(dragState.id, dx, dy);
+    dragState.startX=ev.clientX; dragState.startY=ev.clientY;
+    syncAndRender();
+  });
+  svg.addEventListener('pointerup',()=>{ dragState=null; });
+}
+
+function editableFieldsByType(e){
+  const common=['role','opacity','z_index'];
+  const map={ dot:['x','y','radius','fill'], circle:['x','y','radius','fill'], hollow_dot:['x','y','radius','stroke','stroke_width'], ellipse:['x','y','width','height','rotation','fill'], rectangle:['x','y','width','height','rotation','fill'], triangle:['x','y','width','height','triangle_kind','rotation','fill'], trapezoid:['x','y','width','height','top_ratio','rotation','fill'], line:['x1','y1','x2','y2','stroke','stroke_width','style'], polyline:['points'], curve_line:['points'], line_group:['x','y','width','height','line_count','angle','spacing','stroke','stroke_width'], dot_grid:['x','y','width','height','rows','cols','dot_radius','rotation','fill'], dot_cluster:['x','y','width','height','count','size_min','size_max','randomness','fill'], grid_pattern:['x','y','width','height','rows','cols','stroke','stroke_width'], triangle_pattern:['x','y','width','height','count','size_min','size_max','distribution','fill'] };
+  return [...common, ...(map[e.type]||[])];
+}
+
+function renderPropertyPanel(){
+  const panel=$('property-panel'); const info=$('selection-info'); panel.innerHTML='';
+  const e=getSelected(); if(!e){ info.textContent='未选中对象'; return; }
+  info.textContent=`id=${e.id}, type=${e.type}`;
+  const fields=editableFieldsByType(e);
+  const addRow=(k,v,readonly=false)=>{
+    const row=document.createElement('div'); row.className='form-row'; const l=document.createElement('label'); l.textContent=k;
+    let input; if(readonly){ input=document.createElement('input'); input.readOnly=true; input.value=typeof v==='object'?JSON.stringify(v):String(v??''); }
+    else if(k==='role'||k==='fill'||k==='stroke'||k==='style'||k==='triangle_kind'||k==='distribution'||k==='points'){ input=document.createElement('input'); input.value=typeof v==='object'?JSON.stringify(v):String(v??''); }
+    else { input=document.createElement('input'); input.type='number'; input.step='any'; input.value=String(v??0); }
+    input.onchange=()=>{ updateElementById(e.id,(obj)=>{ if(k==='points'){ try{ obj[k]=JSON.parse(input.value);}catch{return;} } else if(input.type==='number'){ obj[k]=num(input.value); } else { obj[k]=input.value; } if(['x','y','x1','y1','x2','y2','width','height','radius','top_ratio'].includes(k)){ obj[k]=clamp01(obj[k]); } if(['style'].includes(k) && !['solid','dashed'].includes(obj[k])) obj[k]='solid'; }); syncAndRender(); };
+    row.appendChild(l); row.appendChild(input); panel.appendChild(row);
+  };
+  addRow('id',e.id,true); addRow('type',e.type,true); fields.forEach(f=>{ if(!['id','type'].includes(f)) addRow(f,e[f],false); });
+}
+
+function deleteSelected(){ if(!documentState||!selectedId) return; documentState.elements=documentState.elements.filter(e=>e.id!==selectedId); selectedId=null; syncAndRender(); }
+function duplicateSelected(){ const e=getSelected(); if(!e||!documentState) return; const cp=deepCopy(e); cp.id=genId(e.type); cp.z_index=num(e.z_index)+1; if('x' in cp) cp.x=clamp01(num(cp.x)+0.02); if('y' in cp) cp.y=clamp01(num(cp.y)+0.02); if('x1' in cp){ cp.x1=clamp01(num(cp.x1)+0.02); cp.y1=clamp01(num(cp.y1)+0.02); cp.x2=clamp01(num(cp.x2)+0.02); cp.y2=clamp01(num(cp.y2)+0.02);} if(cp.points) cp.points=cp.points.map(p=>[clamp01(num(p[0])+0.02),clamp01(num(p[1])+0.02)]); documentState.elements.push(cp); selectedId=cp.id; syncAndRender(); }
+function shiftZ(step){ const e=getSelected(); if(!e) return; e.z_index=num(e.z_index)+step; syncAndRender(); }
+
+function defaultObject(type){
+  const z=Math.max(0,...(documentState.elements||[]).map(e=>num(e.z_index)))+1;
+  const base={id:genId(type), type, role:'middle', opacity:1, z_index:z};
+  if(type==='circle') return {...base, x:0.45,y:0.45,radius:0.08,fill:'#60a5fa'};
+  if(type==='rectangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.16,rotation:0,fill:'#f59e0b'};
+  if(type==='triangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.18,triangle_kind:'isosceles',rotation:0,fill:'#34d399'};
+  if(type==='line') return {...base, x1:0.35,y1:0.35,x2:0.65,y2:0.55,stroke:'#111827',stroke_width:0.004,style:'solid'};
+  return {...base, x:0.5,y:0.5,radius:0.03,fill:'#ef4444'};
+}
+function addObject(){ if(!documentState) return; const t=$('add-type').value; const obj=defaultObject(t); documentState.elements.push(obj); selectedId=obj.id; syncAndRender(); }
+
+async function validatePayload(payload){
+  const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  return resp.json();
+}
+async function applyFromTextarea(){
+  try{ const payload=JSON.parse($('json').value); const val=await validatePayload(payload); if(!val.valid){ setMessage('', JSON.stringify(val.errors||val,null,2)); return false; } documentState=payload; selectedId=null; setMessage(`JSON 合法，元素 ${val.element_count} 个`,''); syncAndRender(); return true; }
+  catch(err){ setMessage('',`解析失败: ${err.message}`); return false; }
+}
+function clearCanvas(){ documentState=null; selectedId=null; $('scene').innerHTML=''; $('selection-overlay').innerHTML=''; $('element-list').innerHTML=''; $('property-panel').innerHTML=''; $('selection-info').textContent='未选中对象'; $('count').textContent='0'; setMessage('',''); }
+
+$('load').onclick=async()=>{ const r=await fetch('/static/examples/composition_param_sample.json'); const data=await r.json(); $('json').value=JSON.stringify(data,null,2); setMessage('示例 JSON 已加载',''); };
+$('render').onclick=applyFromTextarea; $('apply').onclick=applyFromTextarea; $('clear').onclick=clearCanvas;
+$('delete-object').onclick=deleteSelected; $('duplicate-object').onclick=duplicateSelected; $('bring-forward').onclick=()=>shiftZ(1); $('send-backward').onclick=()=>shiftZ(-1); $('add-object').onclick=addObject;
+bindCanvasInteractions();
 </script>
-</body></html>
+</body>
+</html>

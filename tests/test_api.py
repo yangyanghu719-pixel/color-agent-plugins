@@ -39,6 +39,8 @@ def test_composition_param_test_page():
     resp = client.get("/composition-param-test")
     assert resp.status_code == 200
     assert "点线面参数化渲染测试页" in resp.text
+    for token in ["加载示例 JSON", "渲染 JSON", "清空画布", "删除对象", "复制对象"]:
+        assert token in resp.text
 
 
 def test_upload_image_success(tmp_path):
@@ -110,3 +112,11 @@ def test_sample_json_exists_and_has_required_fields():
         assert "type" in element
         assert "role" in element
         assert "z_index" in element
+
+
+def test_param_test_page_has_add_object_controls():
+    resp = client.get("/composition-param-test")
+    assert resp.status_code == 200
+    assert "新增对象" in resp.text
+    for t in ["circle", "rectangle", "triangle", "line", "dot"]:
+        assert t in resp.text
