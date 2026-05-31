@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -52,6 +52,16 @@ def build_generation_prompt(user_hint: str | None = None) -> str:
 7. 输出必须是严格合法 JSON，且符合下方 CompositionParamDocument JSON Schema。
 8. 不要输出 Markdown 代码块，不要解释，不要输出任何 JSON 以外的文字。
 9. 每个元素需要唯一 id、合法 role、opacity 和 z_index，并满足相应 type 的字段约束。
+10. 禁止使用 schema 外的别名字段：cx、cy、r、center_x、center_y、w、h、color、strokeWidth。
+11. 必须严格使用以下字段名：
+   - circle / dot / hollow_dot: x, y, radius，其中 x/y 表示中心点。
+   - rectangle / ellipse / triangle / trapezoid: x, y, width, height，其中 x/y 表示左上角。
+   - line: x1, y1, x2, y2。
+   - line_group: x, y, width, height, line_count, angle, spacing, stroke_width。
+   - grid_pattern: x, y, width, height, rows, cols, stroke_width。
+   - dot_grid: x, y, width, height, rows, cols, dot_radius。
+   - triangle_pattern: x, y, width, height, count, size_min, size_max。
+12. rectangle / ellipse / triangle / trapezoid / pattern / group 的 x/y 都表示左上角；所有坐标必须在 0~1 范围内。不要使用 schema 外字段。
 
 用户可选提示：{hint}
 
@@ -96,6 +106,233 @@ class QwenParamClient:
 qwen_client = QwenParamClient()
 
 
+def extract_json_payload(raw_text: str) -> Any:
+    """Extract a JSON value from Qwen output while tolerating accidental prose or fences."""
+    text = raw_text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as original_exc:
+        decoder = json.JSONDecoder()
+        for marker in ("{", "["):
+            offset = text.find(marker)
+            while offset != -1:
+                try:
+                    payload, _ = decoder.raw_decode(text[offset:])
+                    return payload
+                except json.JSONDecodeError:
+                    offset = text.find(marker, offset + 1)
+        raise original_exc
+
+
+def _warning(warnings: list[str], index: int, message: str) -> None:
+    warnings.append(f"elements[{index}]: {message}")
+
+
+def _move_alias(element: dict[str, Any], target: str, aliases: tuple[str, ...], warnings: list[str], index: int) -> None:
+    for alias in aliases:
+        if alias not in element:
+            continue
+        if target not in element:
+            element[target] = element[alias]
+            _warning(warnings, index, f"normalized {alias} -> {target}")
+        else:
+            _warning(warnings, index, f"discarded alias {alias} because {target} already exists")
+        element.pop(alias, None)
+
+
+def _default(element: dict[str, Any], key: str, value: Any, warnings: list[str], index: int) -> None:
+    if key not in element:
+        element[key] = value
+        _warning(warnings, index, f"filled default {key}={value!r}")
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _clamp_number(element: dict[str, Any], key: str, minimum: float, maximum: float, warnings: list[str], index: int) -> None:
+    if key not in element:
+        return
+    number = _number(element[key])
+    if number is None:
+        return
+    clamped = min(max(number, minimum), maximum)
+    if element[key] != clamped:
+        _warning(warnings, index, f"clamped/coerced {key}: {element[key]!r} -> {clamped}")
+    element[key] = clamped
+
+
+def _coerce_positive_int(element: dict[str, Any], key: str, warnings: list[str], index: int) -> None:
+    if key not in element:
+        return
+    number = _number(element[key])
+    if number is None:
+        return
+    coerced = max(1, int(number))
+    if element[key] != coerced:
+        _warning(warnings, index, f"coerced {key}: {element[key]!r} -> {coerced}")
+    element[key] = coerced
+
+
+def _normalize_direction(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return {
+        "horizontal": 0,
+        "vertical": 90,
+        "diagonal": 45,
+        "diagonal_up": -45,
+        "diagonal_down": 45,
+        "水平": 0,
+        "垂直": 90,
+        "斜线": 45,
+    }.get(value.lower(), value)
+
+
+def normalize_composition_param_payload(payload: dict, warnings: list[str] | None = None) -> dict:
+    """Normalize common Qwen aliases into the existing CompositionParamDocument schema."""
+    normalized = json.loads(json.dumps(payload))
+    normalization_warnings = warnings if warnings is not None else []
+    elements = normalized.get("elements")
+    if not isinstance(elements, list):
+        return normalized
+
+    center_box_types = {"ellipse", "rectangle", "triangle", "trapezoid", "dot_cluster", "line_group", "grid_pattern", "dot_grid", "triangle_pattern"}
+    fill_types = {"dot", "circle", "ellipse", "rectangle", "triangle", "trapezoid", "dot_grid", "dot_cluster", "triangle_pattern"}
+    stroke_types = {"hollow_dot", "line", "polyline", "curve_line", "line_group", "grid_pattern"}
+    stroke_width_types = {"hollow_dot", "line", "polyline", "curve_line", "line_group", "grid_pattern"}
+
+    for index, raw_element in enumerate(elements):
+        if not isinstance(raw_element, dict):
+            continue
+        element = raw_element
+        _move_alias(element, "type", ("kind",), normalization_warnings, index)
+        _move_alias(element, "fill", ("color", "colour"), normalization_warnings, index)
+        _move_alias(element, "opacity", ("alpha",), normalization_warnings, index)
+        _move_alias(element, "z_index", ("layer", "z"), normalization_warnings, index)
+        _move_alias(element, "stroke_width", ("strokeWidth",), normalization_warnings, index)
+        element_type = element.get("type")
+
+        if element_type in {"circle", "dot", "hollow_dot"}:
+            _move_alias(element, "x", ("cx", "center_x"), normalization_warnings, index)
+            _move_alias(element, "y", ("cy", "center_y"), normalization_warnings, index)
+            _move_alias(element, "radius", ("r",), normalization_warnings, index)
+            if "radius" not in element and "size" in element:
+                size = element.pop("size")
+                element["radius"] = _number(size) / 2 if _number(size) is not None else size
+                _warning(normalization_warnings, index, "normalized size diameter -> radius")
+        elif element_type in center_box_types:
+            _move_alias(element, "width", ("w",), normalization_warnings, index)
+            _move_alias(element, "height", ("h",), normalization_warnings, index)
+            for target, aliases, size in (("x", ("cx", "center_x"), "width"), ("y", ("cy", "center_y"), "height")):
+                for alias in aliases:
+                    if alias not in element:
+                        continue
+                    center = element.pop(alias)
+                    if target not in element and _number(center) is not None and _number(element.get(size)) is not None:
+                        element[target] = _number(center) - _number(element[size]) / 2
+                        _warning(normalization_warnings, index, f"normalized center {alias} -> top-left {target}")
+                    elif target in element:
+                        _warning(normalization_warnings, index, f"discarded alias {alias} because {target} already exists")
+                    else:
+                        _warning(normalization_warnings, index, f"could not normalize {alias} without numeric {size}")
+        if element_type == "line":
+            _move_alias(element, "x1", ("x_start",), normalization_warnings, index)
+            _move_alias(element, "y1", ("y_start",), normalization_warnings, index)
+            _move_alias(element, "x2", ("x_end",), normalization_warnings, index)
+            _move_alias(element, "y2", ("y_end",), normalization_warnings, index)
+            for point_key, x_key, y_key in (("start", "x1", "y1"), ("end", "x2", "y2")):
+                point = element.pop(point_key, None)
+                if isinstance(point, list) and len(point) == 2:
+                    if x_key not in element:
+                        element[x_key] = point[0]
+                    if y_key not in element:
+                        element[y_key] = point[1]
+                    _warning(normalization_warnings, index, f"normalized {point_key} -> {x_key},{y_key}")
+        if element_type == "line_group":
+            _move_alias(element, "width", ("w",), normalization_warnings, index)
+            _move_alias(element, "height", ("h",), normalization_warnings, index)
+            _move_alias(element, "line_count", ("count", "lines"), normalization_warnings, index)
+            _move_alias(element, "angle", ("direction",), normalization_warnings, index)
+            if "angle" in element:
+                element["angle"] = _normalize_direction(element["angle"])
+            if "line_count" not in element and "density" in element:
+                density = str(element["density"]).lower()
+                if density in {"low", "medium", "high"}:
+                    element["line_count"] = {"low": 5, "medium": 10, "high": 16}[density]
+                    _warning(normalization_warnings, index, f"normalized density={density!r} -> line_count={element['line_count']}")
+        if element_type == "grid_pattern":
+            _move_alias(element, "rows", ("row_count",), normalization_warnings, index)
+            _move_alias(element, "cols", ("col_count", "columns"), normalization_warnings, index)
+        if element_type == "dot_grid":
+            _move_alias(element, "width", ("w",), normalization_warnings, index)
+            _move_alias(element, "height", ("h",), normalization_warnings, index)
+            _move_alias(element, "rows", ("row_count",), normalization_warnings, index)
+            _move_alias(element, "cols", ("col_count", "columns"), normalization_warnings, index)
+            _move_alias(element, "dot_radius", ("dot_size", "dotRadius"), normalization_warnings, index)
+        if element_type == "triangle_pattern":
+            _move_alias(element, "count", ("number", "amount"), normalization_warnings, index)
+            _move_alias(element, "size_min", ("min_size",), normalization_warnings, index)
+            _move_alias(element, "size_max", ("max_size",), normalization_warnings, index)
+
+        _default(element, "id", f"element-{index + 1}", normalization_warnings, index)
+        _default(element, "role", "unknown", normalization_warnings, index)
+        _default(element, "opacity", 1, normalization_warnings, index)
+        _default(element, "z_index", index, normalization_warnings, index)
+        if element_type in fill_types:
+            _default(element, "fill", "#000000", normalization_warnings, index)
+        if element_type in stroke_types:
+            _default(element, "stroke", "#000000", normalization_warnings, index)
+        if element_type in stroke_width_types:
+            _default(element, "stroke_width", 0.004, normalization_warnings, index)
+        if element_type in {"ellipse", "rectangle", "triangle", "trapezoid", "dot_grid"}:
+            _default(element, "rotation", 0, normalization_warnings, index)
+        if element_type in {"line", "polyline", "curve_line"}:
+            _default(element, "style", "solid", normalization_warnings, index)
+        if element_type == "line_group":
+            _default(element, "line_count", 10, normalization_warnings, index)
+            _default(element, "spacing", 0.02, normalization_warnings, index)
+        if element_type in {"grid_pattern", "dot_grid"}:
+            _default(element, "rows", 4, normalization_warnings, index)
+            _default(element, "cols", 6, normalization_warnings, index)
+        if element_type == "dot_grid":
+            _default(element, "dot_radius", 0.008, normalization_warnings, index)
+        if element_type == "triangle":
+            _default(element, "triangle_kind", "equilateral", normalization_warnings, index)
+        if element_type == "trapezoid":
+            _default(element, "top_ratio", 0.6, normalization_warnings, index)
+        if element_type == "triangle_pattern":
+            _default(element, "distribution", "scattered", normalization_warnings, index)
+
+        for key in ("x", "y", "x1", "y1", "x2", "y2"):
+            _clamp_number(element, key, 0, 1, normalization_warnings, index)
+        for key in ("width", "height"):
+            _clamp_number(element, key, 0.01, 1, normalization_warnings, index)
+        for key in ("radius",):
+            _clamp_number(element, key, 0.005, 1, normalization_warnings, index)
+        for key in ("stroke_width", "spacing", "dot_radius", "size_min", "size_max", "randomness", "top_ratio"):
+            _clamp_number(element, key, 0, 1, normalization_warnings, index)
+        _clamp_number(element, "opacity", 0, 1, normalization_warnings, index)
+        for key in ("line_count", "rows", "cols", "count"):
+            _coerce_positive_int(element, key, normalization_warnings, index)
+        if "z_index" in element and _number(element["z_index"]) is not None:
+            coerced_z_index = int(_number(element["z_index"]))
+            if element["z_index"] != coerced_z_index:
+                _warning(normalization_warnings, index, f"coerced z_index: {element['z_index']!r} -> {coerced_z_index}")
+            element["z_index"] = coerced_z_index
+
+    return normalized
+
+
 @dataclass
 class GenerationResult:
     status: str
@@ -104,6 +341,8 @@ class GenerationResult:
     valid: bool
     errors: list[dict[str, str]]
     document: dict | None
+    normalized_payload: dict | None
+    normalization_warnings: list[str]
 
     def as_dict(self) -> dict:
         return {
@@ -113,6 +352,8 @@ class GenerationResult:
             "valid": self.valid,
             "errors": self.errors,
             "document": self.document,
+            "normalized_payload": self.normalized_payload,
+            "normalization_warnings": self.normalization_warnings,
         }
 
 
@@ -123,13 +364,15 @@ class CompositionParamGenerationService:
     def generate(self, image_path: str | Path, user_hint: str | None = None) -> GenerationResult:
         raw_text = self.generate_text(image_path, user_hint)
         try:
-            payload = json.loads(raw_text)
+            payload = extract_json_payload(raw_text)
         except json.JSONDecodeError as exc:
-            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None)
+            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None, None, [])
         if not isinstance(payload, dict):
-            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None)
+            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None, None, [])
+        normalization_warnings: list[str] = []
+        normalized_payload = normalize_composition_param_payload(payload, normalization_warnings)
         try:
-            document = CompositionParamDocument.model_validate(payload)
+            document = CompositionParamDocument.model_validate(normalized_payload)
         except ValidationError as exc:
-            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None)
-        return GenerationResult("success", "参数 JSON 草案生成成功", raw_text, True, [], document.model_dump())
+            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None, normalized_payload, normalization_warnings)
+        return GenerationResult("success", "参数 JSON 草案生成成功", raw_text, True, [], document.model_dump(), normalized_payload, normalization_warnings)

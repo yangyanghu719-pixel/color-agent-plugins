@@ -168,6 +168,8 @@ def test_composition_reference_test_page():
     assert "上传参考图" in resp.text
     assert "生成参数 JSON" in resp.text
     assert "/static/js/composition_param_renderer.js" in resp.text
+    assert "normalized_payload" in resp.text
+    assert "normalization_warnings" in resp.text
 
 
 def test_generate_param_json_requires_image():
@@ -187,6 +189,8 @@ def test_generate_param_json_reports_missing_qwen_api_key(tmp_path, monkeypatch)
     assert body["status"] == "error"
     assert body["valid"] is False
     assert "QWEN_API_KEY" in body["message"]
+    assert body["normalized_payload"] is None
+    assert body["normalization_warnings"] == []
 
 
 def test_shared_composition_renderer_served():
