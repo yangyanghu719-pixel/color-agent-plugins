@@ -1,15 +1,21 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas.request_models import ExtractElementsRequest
 from app.schemas.response_models import ExtractElementsResponse, HealthResponse
 from app.services.element_extract_service import ElementExtractService, ExtractConfig, ExtractError
 from app.schemas.composition_param_models import CompositionParamDocument
+from app.services.composition_param_generation_service import (
+    CompositionParamGenerationService,
+    QwenConfigurationError,
+    QwenRequestError,
+    format_validation_errors,
+)
 
 app = FastAPI(title="Composition Lab API", version="0.3.0")
 
@@ -17,6 +23,8 @@ ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 extract_service = ElementExtractService()
+param_generation_service = CompositionParamGenerationService()
+MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -38,6 +46,12 @@ def composition_layer_test() -> HTMLResponse:
 
 
 
+@app.get("/composition-reference-test", response_class=HTMLResponse)
+def composition_reference_test() -> HTMLResponse:
+    html = Path("app/templates/composition_reference_test.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
 @app.get("/composition-param-test", response_class=HTMLResponse)
 def composition_param_test() -> HTMLResponse:
     html = Path("app/templates/composition_param_test.html").read_text(encoding="utf-8")
@@ -55,16 +69,37 @@ def validate_param_json(payload: dict) -> dict:
             "warnings": [],
         }
     except ValidationError as exc:
-        errors = []
-        for e in exc.errors():
-            loc = []
-            for part in e.get("loc", []):
-                if isinstance(part, int):
-                    loc[-1] = f"{loc[-1]}[{part}]"
-                else:
-                    loc.append(str(part))
-            errors.append({"path": ".".join(loc), "message": e.get("msg", "invalid")})
-        return {"valid": False, "message": "JSON 不合法", "errors": errors, "warnings": []}
+        return {"valid": False, "message": "JSON 不合法", "errors": format_validation_errors(exc), "warnings": []}
+
+
+@app.post("/composition/generate-param-json")
+async def composition_generate_param_json(
+    image: UploadFile | None = File(default=None),
+    user_hint: str | None = Form(default=None),
+):
+    if image is None or not image.filename:
+        raise HTTPException(status_code=400, detail="未上传图片，请在 image 字段上传参考图")
+    ext = Path(image.filename).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="文件格式不支持，仅支持 jpg/png/jpeg/webp")
+    content = await image.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="上传图片为空")
+    if len(content) > MAX_REFERENCE_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="上传图片过大，最大允许 10 MB")
+    save_name = f"reference-{uuid4().hex}{ext}"
+    save_path = UPLOAD_DIR / save_name
+    try:
+        save_path.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="参考图保存失败") from exc
+    try:
+        return param_generation_service.generate(save_path, user_hint).as_dict()
+    except QwenConfigurationError as exc:
+        return JSONResponse(status_code=503, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "QWEN_API_KEY", "message": str(exc)}], "document": None})
+    except QwenRequestError as exc:
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "qwen", "message": str(exc)}], "document": None})
+
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)) -> dict:

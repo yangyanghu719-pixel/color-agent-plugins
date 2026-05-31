@@ -136,13 +136,15 @@ def test_param_test_page_has_group_render_and_transform_logic():
     assert "dot_grid" in text and "dot_cluster" in text and "line_group" in text
     assert "dataset.handle='resize'" in text
     assert "dataset.handle='rotate'" in text
-    assert "groupWrap" in text
+    assert "const { known, makeShapeNode } = window.CompositionParamRenderer" in text
     assert "closest?.('[data-id]')" in text
-    assert "line_group'){ node=groupWrap" in text
-    assert "type==='dot_grid'){ node=groupWrap" in text
-    assert "type==='dot_cluster'){ node=groupWrap" in text
-    assert "type==='grid_pattern'){ node=groupWrap" in text
-    assert "type==='triangle_pattern'){ node=groupWrap" in text
+    assert '/static/js/composition_param_renderer.js' in text
+    renderer = Path('static/js/composition_param_renderer.js').read_text(encoding='utf-8')
+    assert "line_group'){ node=groupWrap" in renderer
+    assert "type==='dot_grid'){ node=groupWrap" in renderer
+    assert "type==='dot_cluster'){ node=groupWrap" in renderer
+    assert "type==='grid_pattern'){ node=groupWrap" in renderer
+    assert "type==='triangle_pattern'){ node=groupWrap" in renderer
 
 
 def test_param_test_page_has_bbox_and_svg_coordinate_resize_logic():
@@ -158,3 +160,37 @@ def test_param_test_page_has_bbox_and_svg_coordinate_resize_logic():
     assert "corner==='br'" in text
     assert "newWidth = oldRight - mouse.x" not in text  # doc string not embedded
     assert "const signX=transformState.corner.includes('l')?-1:1;" not in text
+
+
+def test_composition_reference_test_page():
+    resp = client.get("/composition-reference-test")
+    assert resp.status_code == 200
+    assert "上传参考图" in resp.text
+    assert "生成参数 JSON" in resp.text
+    assert "/static/js/composition_param_renderer.js" in resp.text
+
+
+def test_generate_param_json_requires_image():
+    resp = client.post("/composition/generate-param-json")
+    assert resp.status_code == 400
+    assert "未上传图片" in resp.json()["detail"]
+
+
+def test_generate_param_json_reports_missing_qwen_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("QWEN_API_KEY", raising=False)
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json", files={"image": ("reference.png", f, "image/png")})
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["valid"] is False
+    assert "QWEN_API_KEY" in body["message"]
+
+
+def test_shared_composition_renderer_served():
+    resp = client.get("/static/js/composition_param_renderer.js")
+    assert resp.status_code == 200
+    assert "CompositionParamRenderer" in resp.text
+    assert "renderDocument" in resp.text
