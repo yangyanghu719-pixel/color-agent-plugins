@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from PIL import Image
 from pydantic import ValidationError
 
 from app.schemas.composition_param_models import CompositionParamDocument, SUPPORTED_TYPES
@@ -36,17 +37,44 @@ def format_validation_errors(exc: ValidationError) -> list[dict[str, str]]:
     return errors
 
 
-def build_generation_prompt(user_hint: str | None = None) -> str:
+def read_source_image_info(image_path: str | Path) -> dict[str, int | float] | None:
+    """Read source dimensions and derive a proportional preview canvas."""
+    path = Path(image_path)
+    if not path.is_file():
+        return None
+    with Image.open(path) as image:
+        width, height = image.size
+    if width <= 0 or height <= 0:
+        return None
+    return {"width": width, "height": height, "aspect_ratio": round(width / height, 6)}
+
+
+def canvas_for_source(source_image: dict[str, int | float] | None) -> dict[str, int | str]:
+    if not source_image:
+        return {"width": 1000, "height": 1000, "background": "#FFFFFF"}
+    width, height = int(source_image["width"]), int(source_image["height"])
+    aspect_ratio = width / height
+    if 0.95 <= aspect_ratio <= 1.05:
+        canvas_width, canvas_height = 1000, 1000
+    elif width > height:
+        canvas_width, canvas_height = 1000, round(1000 * height / width)
+    else:
+        canvas_width, canvas_height = round(1000 * width / height), 1000
+    return {"width": canvas_width, "height": canvas_height, "background": "#FFFFFF"}
+
+
+def build_generation_prompt(user_hint: str | None = None, canvas: dict[str, int | str] | None = None) -> str:
     supported = ", ".join(sorted(SUPPORTED_TYPES))
     schema = json.dumps(CompositionParamDocument.model_json_schema(), ensure_ascii=False)
     hint = user_hint.strip() if user_hint and user_hint.strip() else "无额外提示"
+    target_canvas = canvas or {"width": 1000, "height": 1000}
     return f"""你是一个“构成图像参数化转译助手”。你的唯一任务是把用户上传的白底抽象构成参考图转译为可编辑的 CompositionParamDocument JSON 草案，而不是精确像素复制。
 
 严格规则：
 1. 只能使用以下图元 type：{supported}。
 2. 优先用少量较大的结构概括，不要碎片化。大结构优先，小装饰其次。
 3. 默认目标元素数量为 6~20 个。即使图像复杂，也绝对不要超过 24 个 elements。不要输出几十上百个小元素。
-4. 所有位置、尺寸、半径、线宽使用 normalized coordinate，数值范围为 0~1；canvas 建议使用 1000x1000。
+4. 所有位置、尺寸、半径、线宽使用 normalized coordinate，数值范围为 0~1；canvas 必须使用后端按原图比例计算的 {target_canvas["width"]}x{target_canvas["height"]}，不要改成 1000x1000。
 5. 顶层必须包含 version、canvas、source_summary、elements。
 6. source_summary 至少包含 input_type、abstract_style、visual_center、balance、density。
 7. 输出必须是严格合法 JSON，且符合下方 CompositionParamDocument JSON Schema。
@@ -62,6 +90,9 @@ def build_generation_prompt(user_hint: str | None = None) -> str:
    - dot_grid: x, y, width, height, rows, cols, dot_radius。
    - triangle_pattern: x, y, width, height, count, size_min, size_max。
 12. rectangle / ellipse / triangle / trapezoid / pattern / group 的 x/y 都表示左上角；所有坐标必须在 0~1 范围内。不要使用 schema 外字段。
+13. 颜色必须直接根据参考图判断，不要使用固定建议色板。每个 plane / shape 必须输出 fill；每个 line / line_group / grid_pattern 必须输出 stroke；点类必须输出 fill 或 stroke。
+14. 每个颜色值必须是 #RRGGBB 格式，并来自参考图主要颜色或近似颜色。不要省略颜色字段，不要把缺失颜色交给后端默认补黑；只有参考图中明确为黑色的区域才使用 #000000。
+15. line_group 用于表达可读的线性节奏，不是大面积涂黑。stroke_width 必须明显小于 spacing，建议不超过 spacing * 0.35；背景纹理线组应更稀疏、更轻。
 
 用户可选提示：{hint}
 
@@ -84,7 +115,7 @@ class QwenParamClient:
             completion = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": build_generation_prompt(user_hint)},
+                    {"role": "system", "content": build_generation_prompt(user_hint, canvas_for_source(read_source_image_info(image_path)))},
                     {
                         "role": "user",
                         "content": [
@@ -198,10 +229,69 @@ def _normalize_direction(value: Any) -> Any:
     }.get(value.lower(), value)
 
 
-def normalize_composition_param_payload(payload: dict, warnings: list[str] | None = None) -> dict:
+def _element_mentions_dark(element: dict[str, Any]) -> bool:
+    text = " ".join(str(value).lower() for value in element.values())
+    return any(keyword in text for keyword in ("black", "dark", "silhouette", "shadow", "黑", "暗", "剪影", "阴影"))
+
+
+def _fallback_color(element: dict[str, Any], color_key: str) -> str:
+    if _element_mentions_dark(element):
+        return "#000000"
+    role = element.get("role", "unknown")
+    if role in {"background_support", "texture_group", "pattern_group"}:
+        return "#B0B0B0"
+    if color_key == "stroke" or role == "structural_line":
+        return "#707070"
+    if role == "support_plane":
+        return "#B8B8B8"
+    return "#909090"
+
+
+def _set_number(element: dict[str, Any], key: str, value: float | int, warnings: list[str], index: int, reason: str) -> None:
+    if element.get(key) != value:
+        _warning(warnings, index, f"adjusted {key}: {element.get(key)!r} -> {value!r} ({reason})")
+        element[key] = value
+
+
+def _normalize_line_group_readability(element: dict[str, Any], warnings: list[str], index: int) -> None:
+    width, height = _number(element.get("width")), _number(element.get("height"))
+    spacing, stroke_width = _number(element.get("spacing")), _number(element.get("stroke_width"))
+    line_count = int(_number(element.get("line_count")) or 1)
+    if spacing is None or stroke_width is None:
+        return
+    is_background = width is not None and height is not None and width > 0.7 and height > 0.7
+    if is_background:
+        if spacing < 0.035:
+            spacing = 0.035
+            _set_number(element, "spacing", spacing, warnings, index, "background texture line groups need visible gaps")
+        if line_count > 24:
+            line_count = 24
+            _set_number(element, "line_count", line_count, warnings, index, "background texture line groups are capped at 24 lines")
+        if _number(element.get("opacity")) is not None and _number(element["opacity"]) > 0.45:
+            _set_number(element, "opacity", 0.45, warnings, index, "background texture line groups stay visually light")
+        max_stroke_width = min(0.006, spacing * 0.25)
+    else:
+        if spacing < 0.01:
+            spacing = 0.01
+            _set_number(element, "spacing", spacing, warnings, index, "line groups need visible gaps")
+        if line_count > 48:
+            line_count = 48
+            _set_number(element, "line_count", line_count, warnings, index, "line group count capped for readable rhythm")
+        max_stroke_width = min(0.02, spacing * 0.35)
+    max_coverage_stroke = 0.35 / max(line_count, 1)
+    max_stroke_width = min(max_stroke_width, max_coverage_stroke)
+    if stroke_width >= spacing or stroke_width > max_stroke_width:
+        _set_number(element, "stroke_width", max_stroke_width, warnings, index, "keep lines separated and coverage readable")
+
+
+def normalize_composition_param_payload(payload: dict, warnings: list[str] | None = None, forced_canvas: dict[str, int | str] | None = None) -> dict:
     """Normalize common Qwen aliases into the existing CompositionParamDocument schema."""
     normalized = json.loads(json.dumps(payload))
     normalization_warnings = warnings if warnings is not None else []
+    if forced_canvas is not None:
+        if normalized.get("canvas") != forced_canvas:
+            normalization_warnings.append(f"document.canvas: overridden by source image ratio -> {forced_canvas['width']}x{forced_canvas['height']}")
+        normalized["canvas"] = dict(forced_canvas)
     elements = normalized.get("elements")
     if not isinstance(elements, list):
         return normalized
@@ -284,14 +374,18 @@ def normalize_composition_param_payload(payload: dict, warnings: list[str] | Non
             _move_alias(element, "size_min", ("min_size",), normalization_warnings, index)
             _move_alias(element, "size_max", ("max_size",), normalization_warnings, index)
 
+        missing_color = (element_type in fill_types and "fill" not in element) or (element_type in stroke_types and "stroke" not in element)
         _default(element, "id", f"element-{index + 1}", normalization_warnings, index)
         _default(element, "role", "unknown", normalization_warnings, index)
-        _default(element, "opacity", 1, normalization_warnings, index)
+        default_opacity = 0.45 if element.get("role") in {"background_support", "texture_group", "pattern_group"} else 1
+        _default(element, "opacity", default_opacity, normalization_warnings, index)
         _default(element, "z_index", index, normalization_warnings, index)
         if element_type in fill_types:
-            _default(element, "fill", "#000000", normalization_warnings, index)
+            _default(element, "fill", _fallback_color(element, "fill"), normalization_warnings, index)
         if element_type in stroke_types:
-            _default(element, "stroke", "#000000", normalization_warnings, index)
+            _default(element, "stroke", _fallback_color(element, "stroke"), normalization_warnings, index)
+        if missing_color and element.get("role") in {"background_support", "texture_group", "pattern_group"} and _number(element.get("opacity")) is not None and _number(element["opacity"]) > 0.45:
+            _set_number(element, "opacity", 0.45, normalization_warnings, index, "neutral fallback textures stay visually light")
         if element_type in stroke_width_types:
             _default(element, "stroke_width", 0.004, normalization_warnings, index)
         if element_type in {"ellipse", "rectangle", "triangle", "trapezoid", "dot_grid"}:
@@ -329,6 +423,8 @@ def normalize_composition_param_payload(payload: dict, warnings: list[str] | Non
             if element["z_index"] != coerced_z_index:
                 _warning(normalization_warnings, index, f"coerced z_index: {element['z_index']!r} -> {coerced_z_index}")
             element["z_index"] = coerced_z_index
+        if element_type == "line_group":
+            _normalize_line_group_readability(element, normalization_warnings, index)
 
     return normalized
 
@@ -343,6 +439,7 @@ class GenerationResult:
     document: dict | None
     normalized_payload: dict | None
     normalization_warnings: list[str]
+    source_image: dict[str, int | float] | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -354,6 +451,7 @@ class GenerationResult:
             "document": self.document,
             "normalized_payload": self.normalized_payload,
             "normalization_warnings": self.normalization_warnings,
+            "source_image": self.source_image,
         }
 
 
@@ -362,17 +460,19 @@ class CompositionParamGenerationService:
         self.generate_text = generate_text or qwen_client.generate
 
     def generate(self, image_path: str | Path, user_hint: str | None = None) -> GenerationResult:
+        source_image = read_source_image_info(image_path)
+        forced_canvas = canvas_for_source(source_image) if source_image else None
         raw_text = self.generate_text(image_path, user_hint)
         try:
             payload = extract_json_payload(raw_text)
         except json.JSONDecodeError as exc:
-            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None, None, [])
+            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None, None, [], source_image)
         if not isinstance(payload, dict):
-            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None, None, [])
+            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None, None, [], source_image)
         normalization_warnings: list[str] = []
-        normalized_payload = normalize_composition_param_payload(payload, normalization_warnings)
+        normalized_payload = normalize_composition_param_payload(payload, normalization_warnings, forced_canvas)
         try:
             document = CompositionParamDocument.model_validate(normalized_payload)
         except ValidationError as exc:
-            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None, normalized_payload, normalization_warnings)
-        return GenerationResult("success", "参数 JSON 草案生成成功", raw_text, True, [], document.model_dump(), normalized_payload, normalization_warnings)
+            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None, normalized_payload, normalization_warnings, source_image)
+        return GenerationResult("success", "参数 JSON 草案生成成功", raw_text, True, [], document.model_dump(), normalized_payload, normalization_warnings, source_image)

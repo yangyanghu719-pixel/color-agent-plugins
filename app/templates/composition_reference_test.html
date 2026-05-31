@@ -19,7 +19,7 @@
     </form>
   </div>
   <div class="grid">
-    <div class="card"><h2>原图预览</h2><img id="source-preview" class="preview" alt="上传图片预览"></div>
+    <div class="card"><h2>原图预览</h2><div id="source-image-info" class="muted">source_image: 尚未生成</div><img id="source-preview" class="preview" alt="上传图片预览"></div>
     <div class="card"><h2>渲染预览</h2><svg id="render-preview" class="preview" xmlns="http://www.w3.org/2000/svg"></svg></div>
     <div class="card"><h2>模型原始文本输出 raw_text</h2><pre id="raw-text">尚未生成</pre></div>
     <div class="card"><h2>归一化后的 JSON normalized_payload</h2><pre id="normalized-json">尚未生成</pre></div>
@@ -30,9 +30,9 @@
 <script src="/static/js/composition_param_renderer.js"></script>
 <script>
 const form=document.getElementById('generate-form'); const image=document.getElementById('image'); const button=document.getElementById('generate');
-const raw=document.getElementById('raw-text'); const normalized=document.getElementById('normalized-json'); const parsed=document.getElementById('parsed-json'); const result=document.getElementById('validation-result'); const preview=document.getElementById('render-preview');
+const sourceInfo=document.getElementById('source-image-info'); const raw=document.getElementById('raw-text'); const normalized=document.getElementById('normalized-json'); const parsed=document.getElementById('parsed-json'); const result=document.getElementById('validation-result'); const preview=document.getElementById('render-preview');
 image.onchange=()=>{ const file=image.files[0]; if(file) document.getElementById('source-preview').src=URL.createObjectURL(file); };
-function showResult(body){ raw.textContent=body.raw_text||''; normalized.textContent=body.normalized_payload?JSON.stringify(body.normalized_payload,null,2):'未生成 normalized_payload'; parsed.textContent=body.document?JSON.stringify(body.document,null,2):'未生成合法 document'; result.className='status '+(body.valid?'ok':'error'); result.textContent=`valid: ${Boolean(body.valid)}\nmessage: ${body.message||''}\nerrors: ${JSON.stringify(body.errors||[],null,2)}\nnormalization_warnings: ${JSON.stringify(body.normalization_warnings||[],null,2)}`; if(body.valid&&body.document){ window.CompositionParamRenderer.renderDocument(preview,body.document); } else { preview.innerHTML=''; } }
+function showResult(body){ sourceInfo.textContent=`source_image: ${body.source_image?JSON.stringify(body.source_image):'尚未生成'}`; raw.textContent=body.raw_text||''; normalized.textContent=body.normalized_payload?JSON.stringify(body.normalized_payload,null,2):'未生成 normalized_payload'; parsed.textContent=body.document?JSON.stringify(body.document,null,2):'未生成合法 document'; result.className='status '+(body.valid?'ok':'error'); result.textContent=`valid: ${Boolean(body.valid)}\nmessage: ${body.message||''}\nerrors: ${JSON.stringify(body.errors||[],null,2)}\nnormalization_warnings: ${JSON.stringify(body.normalization_warnings||[],null,2)}`; if(body.valid&&body.document){ window.CompositionParamRenderer.renderDocument(preview,body.document); } else { preview.innerHTML=''; } }
 form.onsubmit=async(ev)=>{ ev.preventDefault(); if(!image.files[0]){ showResult({valid:false,message:'请先上传参考图',errors:[]}); return; } button.disabled=true; button.textContent='生成中...'; const data=new FormData(form); try{ const response=await fetch('/composition/generate-param-json',{method:'POST',body:data}); const body=await response.json(); showResult(body); }catch(err){ showResult({valid:false,message:`请求失败: ${err.message}`,errors:[]}); }finally{ button.disabled=false; button.textContent='生成参数 JSON'; } };
 </script>
 </body>
