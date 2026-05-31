@@ -4,7 +4,7 @@ import json
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
-from app.main import app
+from app.main import app, param_generation_service
 
 client = TestClient(app)
 
@@ -198,3 +198,33 @@ def test_shared_composition_renderer_served():
     assert resp.status_code == 200
     assert "CompositionParamRenderer" in resp.text
     assert "renderDocument" in resp.text
+
+
+def test_reference_test_page_displays_source_image_info():
+    resp = client.get("/composition-reference-test")
+    assert resp.status_code == 200
+    assert "source_image" in resp.text
+
+
+def test_shared_renderer_preserves_document_canvas_ratio():
+    renderer = Path("static/js/composition_param_renderer.js").read_text(encoding="utf-8")
+    assert "doc.canvas.width" in renderer
+    assert "doc.canvas.height" in renderer
+    assert "preserveAspectRatio" in renderer
+    assert "svg.style.aspectRatio" in renderer
+
+
+def test_generate_param_json_returns_source_ratio_and_forces_canvas(tmp_path, monkeypatch):
+    image_path = tmp_path / "reference-16-9.png"
+    Image.new("RGB", (1600, 900), "white").save(image_path)
+    payload = _sample_json()
+    payload["canvas"] = {"width": 1000, "height": 1000, "background": "#FFFFFF"}
+    monkeypatch.setattr(param_generation_service, "generate_text", lambda image, hint: json.dumps(payload))
+
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json", files={"image": ("reference-16-9.png", f, "image/png")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source_image"] == {"width": 1600, "height": 900, "aspect_ratio": 1.777778}
+    assert body["document"]["canvas"] == {"width": 1000, "height": 562, "background": "#FFFFFF"}

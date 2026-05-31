@@ -96,9 +96,9 @@ async def composition_generate_param_json(
     try:
         return param_generation_service.generate(save_path, user_hint).as_dict()
     except QwenConfigurationError as exc:
-        return JSONResponse(status_code=503, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "QWEN_API_KEY", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": []})
+        return JSONResponse(status_code=503, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "QWEN_API_KEY", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": [], "source_image": None})
     except QwenRequestError as exc:
-        return JSONResponse(status_code=502, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "qwen", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": []})
+        return JSONResponse(status_code=502, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "qwen", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": [], "source_image": None})
 
 
 @app.post("/upload-image")
