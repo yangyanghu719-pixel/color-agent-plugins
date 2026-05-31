@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+static/uploads/*
+!static/uploads/.gitkeep
+static/outputs/*
+!static/outputs/.gitkeep
