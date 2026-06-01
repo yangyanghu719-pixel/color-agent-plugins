@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,9 @@ from app.services.qwen_client import image_to_data_url
 
 DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 DEFAULT_QWEN_MODEL = "qwen-vl-max"
+JSON_MODE_FALLBACK_WARNING = "Qwen JSON mode is not supported by current model/API, fallback to prompt-only JSON instruction."
+
+logger = logging.getLogger(__name__)
 
 
 class QwenConfigurationError(RuntimeError):
@@ -120,6 +124,16 @@ CompositionParamDocument JSON Schema：
 """
 
 
+def _is_json_mode_unsupported_error(exc: Exception) -> bool:
+    """Return whether Qwen rejected the OpenAI-compatible JSON mode parameter."""
+    response = getattr(exc, "response", None)
+    response_text = getattr(response, "text", "") if response is not None else ""
+    detail = f"{exc} {response_text}".lower()
+    mentions_json_mode = "response_format" in detail or "json_object" in detail or "json mode" in detail
+    unsupported_markers = ("not support", "unsupported", "unknown parameter", "invalid parameter", "not allowed")
+    return mentions_json_mode and any(marker in detail for marker in unsupported_markers)
+
+
 class QwenParamClient:
     def generate(self, image_path: str | Path, user_hint: str | None = None) -> str:
         api_key = os.getenv("QWEN_API_KEY")
@@ -130,21 +144,31 @@ class QwenParamClient:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key, base_url=base_url)
+        request_kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": build_generation_prompt(user_hint, canvas_for_source(read_source_image_info(image_path)))},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "请将这张白底抽象构成参考图转译为可编辑的参数 JSON 草案。只输出 JSON。"},
+                        {"type": "image_url", "image_url": {"url": image_to_data_url(str(image_path))}},
+                    ],
+                },
+            ],
+            "extra_body": {"enable_thinking": False},
+        }
         try:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": build_generation_prompt(user_hint, canvas_for_source(read_source_image_info(image_path)))},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "请将这张白底抽象构成参考图转译为可编辑的参数 JSON 草案。只输出 JSON。"},
-                            {"type": "image_url", "image_url": {"url": image_to_data_url(str(image_path))}},
-                        ],
-                    },
-                ],
-                extra_body={"enable_thinking": False},
-            )
+            try:
+                completion = client.chat.completions.create(
+                    **request_kwargs,
+                    response_format={"type": "json_object"},
+                )
+            except Exception as exc:
+                if not _is_json_mode_unsupported_error(exc):
+                    raise
+                logger.warning(JSON_MODE_FALLBACK_WARNING)
+                completion = client.chat.completions.create(**request_kwargs)
         except Exception as exc:
             response = getattr(exc, "response", None)
             upstream_status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
