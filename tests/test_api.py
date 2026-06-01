@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app.main import app, param_generation_service
+from app.services.composition_param_generation_service import QwenRequestError
 
 client = TestClient(app)
 
@@ -170,12 +171,22 @@ def test_composition_reference_test_page():
     assert "/static/js/composition_param_renderer.js" in resp.text
     assert "normalized_payload" in resp.text
     assert "normalization_warnings" in resp.text
+    assert "后端返回了非 JSON 响应" in resp.text
+    assert "parseBackendResponse" in resp.text
+    assert "error_type" in resp.text
+    assert "upstream_status" in resp.text
+    assert "upstream_body_preview" in resp.text
+    assert "source_summary.main_subject" in resp.text
+    assert "source_summary.subject_region" in resp.text
+    assert "复杂动漫人物、写实照片属于压力测试" in resp.text
 
 
 def test_generate_param_json_requires_image():
     resp = client.post("/composition/generate-param-json")
     assert resp.status_code == 400
-    assert "未上传图片" in resp.json()["detail"]
+    body = resp.json()
+    assert body["error_type"] == "missing_image"
+    assert body["message"] == "未上传图片"
 
 
 def test_generate_param_json_reports_missing_qwen_api_key(tmp_path, monkeypatch):
@@ -188,7 +199,9 @@ def test_generate_param_json_reports_missing_qwen_api_key(tmp_path, monkeypatch)
     body = resp.json()
     assert body["status"] == "error"
     assert body["valid"] is False
-    assert "QWEN_API_KEY" in body["message"]
+    assert body["error_type"] == "qwen_api_error"
+    assert body["message"] == "Qwen API 调用失败"
+    assert "QWEN_API_KEY" in body["errors"][0]["message"]
     assert body["normalized_payload"] is None
     assert body["normalization_warnings"] == []
 
@@ -228,3 +241,33 @@ def test_generate_param_json_returns_source_ratio_and_forces_canvas(tmp_path, mo
     body = resp.json()
     assert body["source_image"] == {"width": 1600, "height": 900, "aspect_ratio": 1.777778}
     assert body["document"]["canvas"] == {"width": 1000, "height": 562, "background": "#FFFFFF"}
+
+
+def test_generate_param_json_reports_qwen_500_body_preview(tmp_path, monkeypatch):
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+
+    def fail_generate(image, hint):
+        raise QwenRequestError("Qwen API 调用失败", upstream_status=500, upstream_body_preview="Internal Server Error")
+
+    monkeypatch.setattr(param_generation_service, "generate_text", fail_generate)
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json", files={"image": ("reference.png", f, "image/png")})
+
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["error_type"] == "qwen_api_error"
+    assert body["message"] == "Qwen API 调用失败"
+    assert body["upstream_status"] == 500
+    assert body["upstream_body_preview"] == "Internal Server Error"
+    assert body["valid"] is False
+
+
+def test_generate_param_json_rejects_unsupported_file_type(tmp_path):
+    image_path = tmp_path / "reference.gif"
+    image_path.write_bytes(b"GIF89a")
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json", files={"image": ("reference.gif", f, "image/gif")})
+    assert resp.status_code == 400
+    assert resp.json()["error_type"] == "unsupported_file_type"
+    assert resp.json()["message"] == "不支持的图片格式"

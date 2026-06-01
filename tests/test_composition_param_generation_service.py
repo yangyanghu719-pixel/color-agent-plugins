@@ -18,7 +18,8 @@ def test_generation_service_valid_json_passes_schema_validation():
     result = CompositionParamGenerationService(lambda image, hint: raw).generate("unused.png", "少量大图元")
     assert result.status == "success"
     assert result.valid is True
-    assert result.document == _sample_json()
+    assert result.document["elements"] == _sample_json()["elements"]
+    assert result.document["source_summary"]["main_subject"] == "none"
     assert result.errors == []
 
 
@@ -28,6 +29,7 @@ def test_generation_service_invalid_json_returns_parse_error():
     assert result.valid is False
     assert result.document is None
     assert result.raw_text == "not json"
+    assert result.error_type == "qwen_non_json_response"
     assert "JSON parse error" in result.errors[0]["message"]
 
 
@@ -40,12 +42,13 @@ def test_generation_service_schema_invalid_json_returns_validation_errors():
     assert result.valid is False
     assert result.document is None
     assert result.raw_text == raw
+    assert result.error_type == "schema_validation_error"
     assert result.errors[0]["path"] == "elements[0].type"
 
 
 def test_generation_prompt_restricts_types_counts_and_output_format():
     prompt = build_generation_prompt("尽量用少量大图元概括")
-    for token in ["dot", "triangle_pattern", "6~20", "24", "normalized coordinate", "不要输出 Markdown 代码块", "尽量用少量大图元概括", "禁止使用 schema 外的别名字段", "cx、cy、r", "line_group: x, y, width, height, line_count, angle, spacing, stroke_width", "#RRGGBB", "不要使用固定建议色板", "stroke_width 必须明显小于 spacing"]:
+    for token in ["dot", "triangle_pattern", "6~20", "24", "normalized coordinate", "不要输出 Markdown 代码块", "尽量用少量大图元概括", "禁止使用 schema 外的别名字段", "cx、cy、r", "line_group: x, y, width, height, line_count, angle, spacing, stroke_width", "#RRGGBB", "不要使用固定建议色板", "stroke_width 必须明显小于 spacing", "第一优先级：保留主体", "不要只输出背景速度线", "至少 30% 的元素应服务于主体表达", "main_subject", "subject_region"]:
         assert token in prompt
 
 
@@ -186,3 +189,34 @@ def test_generation_service_large_line_group_is_normalized_to_readable_backgroun
     assert element["stroke_width"] <= min(0.006, element["spacing"] * 0.25)
     assert element["stroke_width"] < element["spacing"]
     assert element["stroke"] != "#000000"
+
+
+def test_generation_service_warns_when_subject_is_only_background_texture():
+    payload = _sample_json()
+    payload["source_summary"].update({"main_subject": "character", "subject_region": [0.2, 0.1, 0.5, 0.8], "subject_priority": "high"})
+    payload["elements"] = [
+        {"id": "speed-lines", "type": "line_group", "role": "texture_group", "x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0, "line_count": 12, "angle": 45, "spacing": 0.05, "stroke": "#999999", "stroke_width": 0.005},
+        {"id": "grid", "type": "grid_pattern", "role": "pattern_group", "x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8, "rows": 4, "cols": 4, "stroke": "#BBBBBB", "stroke_width": 0.003},
+    ]
+
+    result = CompositionParamGenerationService(lambda image, hint: json.dumps(payload)).generate("unused.png")
+
+    assert result.valid is True
+    assert "main subject may be underrepresented" in result.normalization_warnings
+    assert "texture elements dominate the draft" in result.normalization_warnings
+
+
+def test_generation_service_does_not_warn_when_subject_has_plane_elements():
+    payload = _sample_json()
+    payload["source_summary"].update({"main_subject": "character", "subject_region": [0.2, 0.1, 0.5, 0.8], "subject_priority": "high"})
+    payload["elements"] = [
+        {"id": "body", "type": "ellipse", "role": "dominant_plane", "x": 0.3, "y": 0.2, "width": 0.3, "height": 0.6, "fill": "#DD8899"},
+        {"id": "head", "type": "circle", "role": "support_plane", "x": 0.45, "y": 0.18, "radius": 0.12, "fill": "#F2C0A0"},
+        {"id": "speed-lines", "type": "line_group", "role": "texture_group", "x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0, "line_count": 12, "angle": 45, "spacing": 0.05, "stroke": "#999999", "stroke_width": 0.005},
+    ]
+
+    result = CompositionParamGenerationService(lambda image, hint: json.dumps(payload)).generate("unused.png")
+
+    assert result.valid is True
+    assert "main subject may be underrepresented" not in result.normalization_warnings
+    assert "texture elements dominate the draft" not in result.normalization_warnings
