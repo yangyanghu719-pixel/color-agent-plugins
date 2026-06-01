@@ -1,10 +1,15 @@
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from app.services.composition_param_generation_service import (
+    JSON_MODE_FALLBACK_WARNING,
     CompositionParamGenerationService,
+    QwenParamClient,
     build_generation_prompt,
 )
 
@@ -246,3 +251,57 @@ def test_generation_service_does_not_warn_when_subject_has_plane_elements():
     assert result.valid is True
     assert "main subject may be underrepresented" not in result.normalization_warnings
     assert "texture elements dominate the draft" not in result.normalization_warnings
+
+
+def _install_mock_openai(monkeypatch, create):
+    class MockOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=MockOpenAI))
+
+
+def _create_test_image(path: Path) -> None:
+    Image.new("RGB", (8, 6), "white").save(path)
+
+
+def test_qwen_client_requests_json_object_response_format_and_mentions_json_in_prompt(tmp_path, monkeypatch):
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"version":"1.0"}'))])
+
+    _install_mock_openai(monkeypatch, create)
+    monkeypatch.setenv("QWEN_API_KEY", "test-key")
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+
+    raw_text = QwenParamClient().generate(image_path)
+
+    assert raw_text == '{"version":"1.0"}'
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "JSON" in calls[0]["messages"][0]["content"]
+    assert "JSON" in calls[0]["messages"][1]["content"][0]["text"]
+
+
+def test_qwen_client_falls_back_to_prompt_only_json_instruction_when_json_mode_is_unsupported(tmp_path, monkeypatch, caplog):
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if "response_format" in kwargs:
+            raise ValueError("response_format json_object is not supported by this model")
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"version":"1.0"}'))])
+
+    _install_mock_openai(monkeypatch, create)
+    monkeypatch.setenv("QWEN_API_KEY", "test-key")
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+
+    raw_text = QwenParamClient().generate(image_path)
+
+    assert raw_text == '{"version":"1.0"}'
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1]
+    assert JSON_MODE_FALLBACK_WARNING in caplog.text
