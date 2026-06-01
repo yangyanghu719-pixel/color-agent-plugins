@@ -90,6 +90,7 @@ def build_generation_prompt(user_hint: str | None = None, canvas: dict[str, int 
    - circle / dot / hollow_dot: x, y, radius，其中 x/y 表示中心点。
    - rectangle / ellipse / triangle / trapezoid: x, y, width, height，其中 x/y 表示左上角。
    - line: x1, y1, x2, y2。
+   - curve_line: points。贝塞尔曲线必须使用 4 个点 [start, control1, control2, end]；不要把 cp1x / cp1y / cp2x / cp2y 作为最终字段。
    - line_group: x, y, width, height, line_count, angle, spacing, stroke_width。
    - grid_pattern: x, y, width, height, rows, cols, stroke_width。
    - dot_grid: x, y, width, height, rows, cols, dot_radius。
@@ -221,6 +222,23 @@ def _clamp_number(element: dict[str, Any], key: str, minimum: float, maximum: fl
     if element[key] != clamped:
         _warning(warnings, index, f"clamped/coerced {key}: {element[key]!r} -> {clamped}")
     element[key] = clamped
+
+
+def _clamp_points(element: dict[str, Any], warnings: list[str], index: int) -> None:
+    points = element.get("points")
+    if not isinstance(points, list):
+        return
+    for point_index, point in enumerate(points):
+        if not isinstance(point, list) or len(point) != 2:
+            continue
+        for coordinate_index, value in enumerate(point):
+            number = _number(value)
+            if number is None:
+                continue
+            clamped = min(max(number, 0), 1)
+            if value != clamped:
+                _warning(warnings, index, f"clamped/coerced points[{point_index}][{coordinate_index}]: {value!r} -> {clamped}")
+            point[coordinate_index] = clamped
 
 
 def _coerce_positive_int(element: dict[str, Any], key: str, warnings: list[str], index: int) -> None:
@@ -389,6 +407,21 @@ def normalize_composition_param_payload(payload: dict, warnings: list[str] | Non
                     if y_key not in element:
                         element[y_key] = point[1]
                     _warning(normalization_warnings, index, f"normalized {point_key} -> {x_key},{y_key}")
+        if element_type == "curve_line" and "points" not in element and all(key in element for key in ("x1", "y1", "x2", "y2")):
+            endpoint_keys = ("x1", "y1", "x2", "y2")
+            control_keys = ("cp1x", "cp1y", "cp2x", "cp2y")
+            if all(key in element for key in control_keys):
+                element["points"] = [
+                    [element["x1"], element["y1"]],
+                    [element["cp1x"], element["cp1y"]],
+                    [element["cp2x"], element["cp2y"]],
+                    [element["x2"], element["y2"]],
+                ]
+            else:
+                element["points"] = [[element["x1"], element["y1"]], [element["x2"], element["y2"]]]
+            for key in (*endpoint_keys, *control_keys):
+                element.pop(key, None)
+            _warning(normalization_warnings, index, "converted curve_line bezier fields to points")
         if element_type == "line_group":
             _move_alias(element, "width", ("w",), normalization_warnings, index)
             _move_alias(element, "height", ("h",), normalization_warnings, index)
@@ -457,6 +490,7 @@ def normalize_composition_param_payload(payload: dict, warnings: list[str] | Non
         for key in ("stroke_width", "spacing", "dot_radius", "size_min", "size_max", "randomness", "top_ratio"):
             _clamp_number(element, key, 0, 1, normalization_warnings, index)
         _clamp_number(element, "opacity", 0, 1, normalization_warnings, index)
+        _clamp_points(element, normalization_warnings, index)
         for key in ("line_count", "rows", "cols", "count"):
             _coerce_positive_int(element, key, normalization_warnings, index)
         if "z_index" in element and _number(element["z_index"]) is not None:

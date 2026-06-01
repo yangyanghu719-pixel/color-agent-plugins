@@ -48,7 +48,7 @@ def test_generation_service_schema_invalid_json_returns_validation_errors():
 
 def test_generation_prompt_restricts_types_counts_and_output_format():
     prompt = build_generation_prompt("尽量用少量大图元概括")
-    for token in ["dot", "triangle_pattern", "6~20", "24", "normalized coordinate", "不要输出 Markdown 代码块", "尽量用少量大图元概括", "禁止使用 schema 外的别名字段", "cx、cy、r", "line_group: x, y, width, height, line_count, angle, spacing, stroke_width", "#RRGGBB", "不要使用固定建议色板", "stroke_width 必须明显小于 spacing", "第一优先级：保留主体", "不要只输出背景速度线", "至少 30% 的元素应服务于主体表达", "main_subject", "subject_region"]:
+    for token in ["dot", "triangle_pattern", "6~20", "24", "normalized coordinate", "不要输出 Markdown 代码块", "尽量用少量大图元概括", "禁止使用 schema 外的别名字段", "cx、cy、r", "line_group: x, y, width, height, line_count, angle, spacing, stroke_width", "#RRGGBB", "不要使用固定建议色板", "stroke_width 必须明显小于 spacing", "第一优先级：保留主体", "不要只输出背景速度线", "至少 30% 的元素应服务于主体表达", "main_subject", "subject_region", "curve_line: points", "[start, control1, control2, end]", "不要把 cp1x / cp1y / cp2x / cp2y 作为最终字段"]:
         assert token in prompt
 
 
@@ -93,6 +93,32 @@ def test_generation_service_normalizes_box_size_color_and_stroke_width_aliases()
     assert element["fill"] == "#ABCDEF"
     assert element["stroke_width"] == 0.006
     assert "w" not in element and "h" not in element and "color" not in element and "strokeWidth" not in element
+
+
+def test_generation_service_normalizes_curve_line_bezier_fields_to_clamped_points():
+    payload = _document_with_element({
+        "type": "curve_line", "x1": -0.2, "y1": 0.1, "cp1x": 0.25, "cp1y": 1.2,
+        "cp2x": "0.75", "cp2y": 0.8, "x2": 1.4, "y2": 0.9,
+    })
+
+    result = CompositionParamGenerationService(lambda image, hint: json.dumps(payload)).generate("unused.png")
+
+    assert result.valid is True
+    element = result.normalized_payload["elements"][0]
+    assert element["points"] == [[0, 0.1], [0.25, 1], [0.75, 0.8], [1, 0.9]]
+    assert all(key not in element for key in ("x1", "y1", "x2", "y2", "cp1x", "cp1y", "cp2x", "cp2y"))
+    assert "elements[0]: converted curve_line bezier fields to points" in result.normalization_warnings
+
+
+def test_generation_service_normalizes_curve_line_endpoint_fields_to_points():
+    payload = _document_with_element({"type": "curve_line", "x1": -0.1, "y1": 0.2, "x2": 1.1, "y2": 0.8})
+
+    result = CompositionParamGenerationService(lambda image, hint: json.dumps(payload)).generate("unused.png")
+
+    assert result.valid is False
+    assert result.normalized_payload["elements"][0]["points"] == [[0, 0.2], [1, 0.8]]
+    assert "elements[0]: converted curve_line bezier fields to points" in result.normalization_warnings
+    assert "points must contain at least 3 points" in result.errors[0]["message"]
 
 
 def test_generation_service_normalizes_line_group_aliases_and_defaults():
