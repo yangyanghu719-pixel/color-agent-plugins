@@ -227,6 +227,26 @@ def test_shared_renderer_preserves_document_canvas_ratio():
     assert "svg.style.aspectRatio" in renderer
 
 
+def test_generate_param_json_normalizes_curve_line_bezier_fields(tmp_path, monkeypatch):
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+    payload = _sample_json()
+    payload["elements"] = [{
+        "type": "curve_line", "x1": -0.1, "y1": 0.2, "cp1x": 0.3, "cp1y": 1.2,
+        "cp2x": 0.7, "cp2y": 0.8, "x2": 1.1, "y2": 0.9,
+    }]
+    monkeypatch.setattr(param_generation_service, "generate_text", lambda image, hint: json.dumps(payload))
+
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json", files={"image": ("reference.png", f, "image/png")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["normalized_payload"]["elements"][0]["points"] == [[0, 0.2], [0.3, 1], [0.7, 0.8], [1, 0.9]]
+    assert "elements[0]: converted curve_line bezier fields to points" in body["normalization_warnings"]
+
+
 def test_generate_param_json_returns_source_ratio_and_forces_canvas(tmp_path, monkeypatch):
     image_path = tmp_path / "reference-16-9.png"
     Image.new("RGB", (1600, 900), "white").save(image_path)
