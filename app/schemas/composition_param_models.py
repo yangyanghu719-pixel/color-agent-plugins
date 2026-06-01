@@ -55,6 +55,9 @@ class CompositionSourceSummary(BaseModel):
     visual_center: list[float] = Field(default_factory=lambda: [0.5, 0.5], min_length=2, max_length=2)
     balance: str = "centered"
     density: str = "medium"
+    main_subject: str = "none"
+    subject_region: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    subject_priority: Literal["high", "medium", "low"] = "low"
 
     @field_validator("visual_center")
     @classmethod
@@ -62,6 +65,13 @@ class CompositionSourceSummary(BaseModel):
         for axis in value:
             if not 0 <= axis <= 1:
                 raise ValueError("visual_center must be between 0 and 1")
+        return value
+
+    @field_validator("subject_region")
+    @classmethod
+    def validate_subject_region(cls, value: list[float] | None) -> list[float] | None:
+        if value is not None and any(not 0 <= axis <= 1 for axis in value):
+            raise ValueError("subject_region must be between 0 and 1")
         return value
 
 

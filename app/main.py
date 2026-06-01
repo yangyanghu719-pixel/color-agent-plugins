@@ -27,6 +27,34 @@ param_generation_service = CompositionParamGenerationService()
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 
 
+def generation_error_response(
+    status_code: int,
+    error_type: str,
+    message: str,
+    *,
+    errors: list[dict[str, str]] | None = None,
+    upstream_status: int | None = None,
+    upstream_body_preview: str = "",
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "error",
+            "error_type": error_type,
+            "message": message,
+            "raw_text": "",
+            "upstream_status": upstream_status,
+            "upstream_body_preview": upstream_body_preview[:500],
+            "valid": False,
+            "document": None,
+            "normalized_payload": None,
+            "normalization_warnings": [],
+            "errors": errors or [{"path": "", "message": message}],
+            "source_image": None,
+        },
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict:
     return {"status": "ok", "message": "service is running"}
@@ -78,27 +106,29 @@ async def composition_generate_param_json(
     user_hint: str | None = Form(default=None),
 ):
     if image is None or not image.filename:
-        raise HTTPException(status_code=400, detail="未上传图片，请在 image 字段上传参考图")
+        return generation_error_response(400, "missing_image", "未上传图片")
     ext = Path(image.filename).suffix.lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="文件格式不支持，仅支持 jpg/png/jpeg/webp")
+        return generation_error_response(400, "unsupported_file_type", "不支持的图片格式")
     content = await image.read()
     if not content:
-        raise HTTPException(status_code=400, detail="上传图片为空")
+        return generation_error_response(400, "missing_image", "未上传图片")
     if len(content) > MAX_REFERENCE_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="上传图片过大，最大允许 10 MB")
+        return generation_error_response(400, "invalid_image", "上传图片过大，最大允许 10 MB")
     save_name = f"reference-{uuid4().hex}{ext}"
     save_path = UPLOAD_DIR / save_name
     try:
         save_path.write_bytes(content)
     except OSError as exc:
-        raise HTTPException(status_code=500, detail="参考图保存失败") from exc
+        return generation_error_response(500, "internal_error", "参考图保存失败", errors=[{"path": "image", "message": str(exc)}])
     try:
         return param_generation_service.generate(save_path, user_hint).as_dict()
     except QwenConfigurationError as exc:
-        return JSONResponse(status_code=503, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "QWEN_API_KEY", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": [], "source_image": None})
+        return generation_error_response(503, "qwen_api_error", "Qwen API 调用失败", errors=[{"path": "QWEN_API_KEY", "message": str(exc)}])
     except QwenRequestError as exc:
-        return JSONResponse(status_code=502, content={"status": "error", "message": str(exc), "raw_text": "", "valid": False, "errors": [{"path": "qwen", "message": str(exc)}], "document": None, "normalized_payload": None, "normalization_warnings": [], "source_image": None})
+        return generation_error_response(502, "qwen_api_error", "Qwen API 调用失败", errors=[{"path": "qwen", "message": str(exc)}], upstream_status=exc.upstream_status, upstream_body_preview=exc.upstream_body_preview)
+    except Exception as exc:
+        return generation_error_response(500, "internal_error", "参数 JSON 生成服务异常", errors=[{"path": "server", "message": str(exc)}])
 
 
 @app.post("/upload-image")

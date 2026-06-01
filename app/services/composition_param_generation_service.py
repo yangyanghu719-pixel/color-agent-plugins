@@ -23,6 +23,11 @@ class QwenConfigurationError(RuntimeError):
 class QwenRequestError(RuntimeError):
     """Raised when the Qwen API request fails or produces no content."""
 
+    def __init__(self, message: str, upstream_status: int | None = None, upstream_body_preview: str = "") -> None:
+        super().__init__(message)
+        self.upstream_status = upstream_status
+        self.upstream_body_preview = upstream_body_preview[:500]
+
 
 def format_validation_errors(exc: ValidationError) -> list[dict[str, str]]:
     errors = []
@@ -76,7 +81,7 @@ def build_generation_prompt(user_hint: str | None = None, canvas: dict[str, int 
 3. 默认目标元素数量为 6~20 个。即使图像复杂，也绝对不要超过 24 个 elements。不要输出几十上百个小元素。
 4. 所有位置、尺寸、半径、线宽使用 normalized coordinate，数值范围为 0~1；canvas 必须使用后端按原图比例计算的 {target_canvas["width"]}x{target_canvas["height"]}，不要改成 1000x1000。
 5. 顶层必须包含 version、canvas、source_summary、elements。
-6. source_summary 至少包含 input_type、abstract_style、visual_center、balance、density。
+6. source_summary 必须包含 input_type、abstract_style、visual_center、balance、density、main_subject、subject_region、subject_priority。main_subject 用 character / person / object / animal / building / icon / geometric_shape / none 等简短值；subject_region 使用 [x, y, width, height] normalized coordinate；subject_priority 使用 high / medium / low。
 7. 输出必须是严格合法 JSON，且符合下方 CompositionParamDocument JSON Schema。
 8. 不要输出 Markdown 代码块，不要解释，不要输出任何 JSON 以外的文字。
 9. 每个元素需要唯一 id、合法 role、opacity 和 z_index，并满足相应 type 的字段约束。
@@ -93,6 +98,19 @@ def build_generation_prompt(user_hint: str | None = None, canvas: dict[str, int 
 13. 颜色必须直接根据参考图判断，不要使用固定建议色板。每个 plane / shape 必须输出 fill；每个 line / line_group / grid_pattern 必须输出 stroke；点类必须输出 fill 或 stroke。
 14. 每个颜色值必须是 #RRGGBB 格式，并来自参考图主要颜色或近似颜色。不要省略颜色字段，不要把缺失颜色交给后端默认补黑；只有参考图中明确为黑色的区域才使用 #000000。
 15. line_group 用于表达可读的线性节奏，不是大面积涂黑。stroke_width 必须明显小于 spacing，建议不超过 spacing * 0.35；背景纹理线组应更稀疏、更轻。
+
+转译优先级：
+第一优先级：保留主体。先识别画面中的 main subject；主体可能是人物、物体、动物、建筑、图标或中心形状。如果存在明显主体，必须用 2~6 个 role 为 dominant_plane / support_plane / accent_plane 的 plane/shape 元素表达主体。可以使用 ellipse、circle、rectangle、triangle、trapezoid 或 polygon-like approximation；当前 schema 没有自由 polygon 时，优先组合 ellipse / rectangle / triangle / trapezoid 近似。不要求还原细节，但必须保留主体的大位置、大体块和主色关系。
+第二优先级：保留大构图关系。保留画面比例、视觉中心、主体和背景的位置关系、大色块、动势方向和主次关系。
+第三优先级：保留纹理和背景节奏。line_group / grid_pattern / dot_grid / triangle_pattern 只能作为辅助。存在明显主体时，texture_group / pattern_group 的元素数量不能超过总元素的 40%，至少 30% 的元素应服务于主体表达。line_group 不应成为唯一主要内容，除非原图本身就是纯线构成。
+
+禁止的坏结果：
+- 不要只输出背景速度线。
+- 不要只输出 line_group / texture_group。
+- 如果画面中有主体，不允许忽略主体。
+- 主体不需要细节还原，但必须有可见的大体块表达。
+- 背景纹理必须弱于主体。
+- 输出的是可编辑构成草案，不是背景纹理检测结果。
 
 用户可选提示：{hint}
 
@@ -127,7 +145,10 @@ class QwenParamClient:
                 extra_body={"enable_thinking": False},
             )
         except Exception as exc:
-            raise QwenRequestError(f"Qwen API 调用失败: {exc}") from exc
+            response = getattr(exc, "response", None)
+            upstream_status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+            upstream_body = getattr(response, "text", "") if response is not None else ""
+            raise QwenRequestError("Qwen API 调用失败", upstream_status, upstream_body or str(exc)) from exc
         content = completion.choices[0].message.content
         if not content:
             raise QwenRequestError("Qwen API 返回了空内容")
@@ -284,6 +305,26 @@ def _normalize_line_group_readability(element: dict[str, Any], warnings: list[st
         _set_number(element, "stroke_width", max_stroke_width, warnings, index, "keep lines separated and coverage readable")
 
 
+def _append_subject_quality_warnings(payload: dict, warnings: list[str]) -> None:
+    source_summary = payload.get("source_summary")
+    elements = payload.get("elements")
+    if not isinstance(source_summary, dict) or not isinstance(elements, list) or not elements:
+        return
+    main_subject = str(source_summary.get("main_subject", "none")).strip().lower()
+    if not main_subject or main_subject == "none":
+        return
+    plane_roles = {"dominant_plane", "support_plane", "accent_plane"}
+    texture_roles = {"texture_group", "pattern_group"}
+    texture_types = {"line_group", "grid_pattern", "dot_grid", "triangle_pattern"}
+    objects = [element for element in elements if isinstance(element, dict)]
+    plane_count = sum(element.get("role") in plane_roles for element in objects)
+    texture_count = sum(element.get("role") in texture_roles or element.get("type") in texture_types for element in objects)
+    if plane_count < 2:
+        warnings.append("main subject may be underrepresented")
+    if objects and texture_count / len(objects) > 0.6:
+        warnings.append("texture elements dominate the draft")
+
+
 def normalize_composition_param_payload(payload: dict, warnings: list[str] | None = None, forced_canvas: dict[str, int | str] | None = None) -> dict:
     """Normalize common Qwen aliases into the existing CompositionParamDocument schema."""
     normalized = json.loads(json.dumps(payload))
@@ -426,6 +467,7 @@ def normalize_composition_param_payload(payload: dict, warnings: list[str] | Non
         if element_type == "line_group":
             _normalize_line_group_readability(element, normalization_warnings, index)
 
+    _append_subject_quality_warnings(normalized, normalization_warnings)
     return normalized
 
 
@@ -440,6 +482,9 @@ class GenerationResult:
     normalized_payload: dict | None
     normalization_warnings: list[str]
     source_image: dict[str, int | float] | None = None
+    error_type: str | None = None
+    upstream_status: int | None = None
+    upstream_body_preview: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -452,6 +497,9 @@ class GenerationResult:
             "normalized_payload": self.normalized_payload,
             "normalization_warnings": self.normalization_warnings,
             "source_image": self.source_image,
+            "error_type": self.error_type,
+            "upstream_status": self.upstream_status,
+            "upstream_body_preview": self.upstream_body_preview,
         }
 
 
@@ -466,13 +514,13 @@ class CompositionParamGenerationService:
         try:
             payload = extract_json_payload(raw_text)
         except json.JSONDecodeError as exc:
-            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None, None, [], source_image)
+            return GenerationResult("error", "Qwen 返回内容不是合法 JSON", raw_text, False, [{"path": "", "message": f"JSON parse error: {exc.msg} at line {exc.lineno} column {exc.colno}"}], None, None, [], source_image, "qwen_non_json_response")
         if not isinstance(payload, dict):
-            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None, None, [], source_image)
+            return GenerationResult("error", "Qwen 返回 JSON 顶层必须是对象", raw_text, False, [{"path": "", "message": "document must be a JSON object"}], None, None, [], source_image, "schema_validation_error")
         normalization_warnings: list[str] = []
         normalized_payload = normalize_composition_param_payload(payload, normalization_warnings, forced_canvas)
         try:
             document = CompositionParamDocument.model_validate(normalized_payload)
         except ValidationError as exc:
-            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None, normalized_payload, normalization_warnings, source_image)
+            return GenerationResult("error", "Qwen 返回 JSON 未通过 CompositionParamDocument schema 校验", raw_text, False, format_validation_errors(exc), None, normalized_payload, normalization_warnings, source_image, "schema_validation_error")
         return GenerationResult("success", "参数 JSON 草案生成成功", raw_text, True, [], document.model_dump(), normalized_payload, normalization_warnings, source_image)
