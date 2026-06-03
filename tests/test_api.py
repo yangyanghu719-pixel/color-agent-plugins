@@ -323,3 +323,91 @@ def test_generate_param_json_rejects_unsupported_file_type(tmp_path):
     assert resp.status_code == 400
     assert resp.json()["error_type"] == "unsupported_file_type"
     assert resp.json()["message"] == "不支持的图片格式"
+
+
+def test_composition_workflow_test_page_controls():
+    resp = client.get("/composition-workflow-test")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "工作流生成区" in text
+    assert 'id="workflow-image"' in text
+    assert 'type="file"' in text
+    assert "生成参数 JSON" in text
+    assert 'id="workflow-status"' in text
+    assert "待命" in text
+    assert 'id="json"' in text
+    assert 'id="render"' in text
+    assert "渲染 JSON" in text
+    assert "/static/js/composition_param_renderer.js" in text
+
+
+def test_workflow_generate_requires_image():
+    resp = client.post("/composition/generate-param-json-by-workflow")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["message"] == "上传文件缺失"
+
+
+def test_workflow_generate_rejects_unsupported_file_type(tmp_path):
+    file_path = tmp_path / "reference.gif"
+    file_path.write_bytes(b"GIF89a")
+    with file_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json-by-workflow", files={"image": ("reference.gif", f, "image/gif")})
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert "文件类型不支持" in body["message"]
+
+
+def test_workflow_generate_parses_output_text_result1(tmp_path, monkeypatch):
+    from app.main import workflow_param_generation_service
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://public.example.com")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "test-key")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "test-app")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
+    payload = {"result1": _sample_json()}
+    monkeypatch.setattr(
+        workflow_param_generation_service,
+        "call_workflow",
+        lambda image_url, user_hint=None: {"output": {"text": f"```json\n{json.dumps(payload)}\n```"}},
+    )
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+    with image_path.open("rb") as f:
+        resp = client.post(
+            "/composition/generate-param-json-by-workflow",
+            files={"image": ("reference.png", f, "image/png")},
+            data={"user_hint": "保留主体"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["document"]["version"] == _sample_json()["version"]
+    assert body["document"]["elements"]
+    assert body["textarea_json"].startswith("{\n")
+    assert body["image_url"].startswith("https://public.example.com/static/uploads/workflow_inputs/")
+
+
+def test_workflow_generate_reports_invalid_json(tmp_path, monkeypatch):
+    from app.main import workflow_param_generation_service
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://public.example.com")
+    monkeypatch.setattr(workflow_param_generation_service, "call_workflow", lambda image_url, user_hint=None: {"output": {"text": "not json"}})
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+    with image_path.open("rb") as f:
+        resp = client.post("/composition/generate-param-json-by-workflow", files={"image": ("reference.png", f, "image/png")})
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["message"] == "返回文本不是合法 JSON"
+    assert body["raw_text"] == "not json"
+
+
+def test_composition_param_test_still_available_after_workflow_page():
+    resp = client.get("/composition-param-test")
+    assert resp.status_code == 200
+    assert "点线面参数化渲染测试页" in resp.text
+    assert "工作流生成区" not in resp.text

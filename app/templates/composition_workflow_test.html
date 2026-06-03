@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>点线面参数化渲染测试页</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; }
+    .header { padding: 12px 16px; background: #1f2937; color: #fff; }
+    .layout { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 12px; padding: 12px; }
+    .panel { background: #fff; border-radius: 8px; padding: 10px; min-height: 820px; }
+    textarea { width: 100%; height: 740px; font-family: monospace; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+    .canvas-wrap { display: flex; justify-content: center; }
+    #canvas { width: 800px; height: 800px; border: 1px solid #d1d5db; background: #fff; touch-action: none; }
+    .item { padding: 6px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+    .item:hover, .item.active { background: #eff6ff; }
+    .err { color: #b91c1c; white-space: pre-wrap; font-size: 13px; }
+    .ok { color: #047857; white-space: pre-wrap; font-size: 13px; }
+    .meta { font-size: 13px; color: #374151; }
+    .section { margin-top: 12px; }
+    .form-row { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .form-row input, .form-row select { width: 100%; box-sizing: border-box; }
+    #element-list { max-height: 250px; overflow: auto; border: 1px solid #e5e7eb; }
+    #selection-overlay { pointer-events: none; }
+    .workflow-box { border: 1px solid #dbeafe; background: #eff6ff; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .workflow-box h4 { margin: 0 0 8px; }
+    .workflow-box label { display:block; font-size:12px; color:#374151; margin-top:8px; }
+    .workflow-box input[type="text"] { width:100%; box-sizing:border-box; padding:6px; }
+    .workflow-status { margin-top:8px; min-height:20px; font-size:13px; color:#1e40af; }
+    .workflow-progress { height:6px; background:#dbeafe; border-radius:999px; overflow:hidden; margin-top:8px; display:none; }
+    .workflow-progress.active { display:block; }
+    .workflow-progress span { display:block; height:100%; width:35%; background:#2563eb; border-radius:999px; animation: workflowSlide 1s linear infinite; }
+    @keyframes workflowSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  </style>
+</head>
+<body>
+<div class="header"><h2>点线面参数化工作流生成测试页（独立测试页）</h2></div>
+<div class="layout">
+  <div class="panel">
+    <div class="workflow-box" id="workflow-zone">
+      <h4>工作流生成区</h4>
+      <label for="workflow-image">上传图片（jpg/jpeg/png/webp）</label>
+      <input id="workflow-image" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
+      <label for="workflow-hint">可选 user_hint</label>
+      <input id="workflow-hint" type="text" placeholder="例如：保留主体大色块，减少背景纹理">
+      <div class="btns" style="margin-top:8px;">
+        <button id="workflow-generate">生成参数 JSON</button>
+      </div>
+      <div id="workflow-status" class="workflow-status" aria-live="polite">待命</div>
+      <div id="workflow-progress" class="workflow-progress" aria-hidden="true"><span></span></div>
+    </div>
+    <div class="btns">
+      <button id="load">加载示例 JSON</button>
+      <button id="render">渲染 JSON</button>
+      <button id="clear">清空画布</button>
+      <button id="apply">应用当前文本 JSON</button>
+    </div>
+    <textarea id="json"></textarea>
+  </div>
+
+  <div class="panel">
+    <div class="meta" id="canvas-meta">canvas: 800x800, background: #FFFFFF</div>
+    <div class="canvas-wrap">
+      <svg id="canvas" viewBox="0 0 1000 1000">
+        <g id="scene"></g>
+        <g id="selection-overlay"></g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="meta">当前元素数量: <span id="count">0</span></div>
+    <h4>校验/渲染信息</h4>
+    <div id="errors" class="err"></div>
+    <div id="success" class="ok"></div>
+
+    <div class="section">
+      <h4>新增对象（最小版）</h4>
+      <div class="btns">
+        <select id="add-type">
+          <option value="circle">circle</option><option value="rectangle">rectangle</option>
+          <option value="triangle">triangle</option><option value="line">line</option>
+          <option value="dot">dot</option>
+        </select>
+        <button id="add-object">新增对象</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h4>元素列表</h4>
+      <div id="element-list"></div>
+    </div>
+
+    <div class="section">
+      <h4>编辑操作</h4>
+      <div class="btns">
+        <button id="delete-object">删除对象</button>
+        <button id="duplicate-object">复制对象</button>
+        <button id="bring-forward">上移一层</button>
+        <button id="send-backward">下移一层</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h4>当前选中对象属性面板</h4>
+      <div id="selection-info" class="meta">未选中对象</div>
+      <div id="property-panel"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/composition_param_renderer.js"></script>
+<script>
+const svgNs = 'http://www.w3.org/2000/svg';
+const $ = (id) => document.getElementById(id);
+let documentState = null;
+let selectedId = null;
+let dragState = null;
+let transformState = null;
+
+const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
+const num = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
+const create = (el) => document.createElementNS(svgNs, el);
+const nX = (v,w) => v*w; const nY = (v,h) => v*h;
+const sw = (v,w) => Math.max(1, num(v,0.001) * w);
+const DEG = 180 / Math.PI;
+
+
+function setWorkflowStatus(text, active=false){
+  const status = $('workflow-status');
+  const progress = $('workflow-progress');
+  if(status) status.textContent = text;
+  if(progress) progress.classList.toggle('active', Boolean(active));
+}
+function workflowErrorSummary(body){
+  if(!body) return '';
+  const parts = [body.message || '生成失败'];
+  if(body.upstream_status) parts.push(`HTTP ${body.upstream_status}`);
+  if(body.upstream_body_preview) parts.push(body.upstream_body_preview.slice(0, 200));
+  if(body.raw_text) parts.push(body.raw_text.slice(0, 200));
+  return parts.filter(Boolean).join(' | ');
+}
+async function generateByWorkflow(){
+  const fileInput = $('workflow-image');
+  const button = $('workflow-generate');
+  const file = fileInput?.files?.[0];
+  if(!file){
+    setWorkflowStatus('生成失败：请先上传图片');
+    setMessage('', '上传文件缺失');
+    return;
+  }
+  const allowed = ['image/jpeg','image/png','image/webp'];
+  const extOk = /\.(jpe?g|png|webp)$/i.test(file.name || '');
+  if(!allowed.includes(file.type) && !extOk){
+    setWorkflowStatus('生成失败：文件类型不支持');
+    setMessage('', '文件类型不支持，仅支持 jpg/jpeg/png/webp');
+    return;
+  }
+  const before = $('json').value;
+  const form = new FormData();
+  form.append('image', file);
+  form.append('user_hint', $('workflow-hint').value || '');
+  button.disabled = true;
+  try{
+    setWorkflowStatus('正在上传图片...', true);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    setWorkflowStatus('正在调用阿里云工作流...', true);
+    const resp = await fetch('/composition/generate-param-json-by-workflow', { method:'POST', body: form });
+    setWorkflowStatus('正在解析返回结果...', true);
+    let body = null;
+    try { body = await resp.json(); } catch(e) { body = { ok:false, message:'后端返回了非 JSON 响应' }; }
+    if(!resp.ok || !body.ok){
+      $('json').value = before;
+      const msg = workflowErrorSummary(body);
+      setWorkflowStatus(`生成失败：${msg}`);
+      setMessage('', msg);
+      return;
+    }
+    $('json').value = body.textarea_json || JSON.stringify(body.document, null, 2);
+    setWorkflowStatus('生成成功，可点击渲染 JSON');
+    setMessage('生成成功，可点击渲染 JSON', '');
+  }catch(e){
+    $('json').value = before;
+    setWorkflowStatus(`生成失败：${e.message || e}`);
+    setMessage('', `调用阿里云工作流失败：${e.message || e}`);
+  }finally{
+    button.disabled = false;
+    $('workflow-progress').classList.remove('active');
+  }
+}
+
+function deepCopy(v){ return JSON.parse(JSON.stringify(v)); }
+function getElementsSorted(){ return [...(documentState?.elements || [])].sort((a,b)=>num(a.z_index)-num(b.z_index)); }
+function getSelected(){ return (documentState?.elements || []).find(e => e.id === selectedId) || null; }
+function genId(prefix='el'){ return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; }
+function updateTextarea(){ if(documentState){ $('json').value = JSON.stringify(documentState, null, 2); } }
+function setMessage(ok, err=''){ $('success').textContent = ok || ''; $('errors').textContent = err || ''; }
+function setCanvasMeta(doc){
+  const canvas = doc?.canvas || {};
+  const width = num(canvas.width, 1000);
+  const height = num(canvas.height, 1000);
+  const background = canvas.background || '#FFFFFF';
+  const svg = $('canvas');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.aspectRatio = `${width} / ${height}`;
+  svg.style.background = background;
+  $('canvas-meta').textContent = `canvas: ${width}x${height}, background: ${background}`;
+}
+const { known, makeShapeNode } = window.CompositionParamRenderer;
+function renderAll(){
+  const scene = $('scene'); scene.innerHTML=''; $('selection-overlay').innerHTML='';
+  if(!documentState){ $('count').textContent='0'; return; }
+  setCanvasMeta(documentState);
+  const sorted=getElementsSorted();
+  sorted.forEach(e=>{ if(known.has(e.type)){ const n=makeShapeNode(e,documentState.canvas); if(n) scene.appendChild(n);} });
+  $('count').textContent = String(sorted.length);
+  renderList(); renderSelectionOverlay(); renderPropertyPanel();
+}
+function renderList(){ const list=$('element-list'); list.innerHTML=''; getElementsSorted().forEach(e=>{ const div=document.createElement('div'); div.className='item'+(e.id===selectedId?' active':''); div.textContent=`${e.id} | ${e.type} | ${e.role} | z=${e.z_index}`; div.onclick=()=>setSelected(e.id); list.appendChild(div); }); }
+function getMouseNormalized(ev){
+  if(!documentState) return {x:0,y:0};
+  const svg=$('canvas');
+  const pt=svg.createSVGPoint();
+  pt.x=ev.clientX; pt.y=ev.clientY;
+  const ctm=svg.getScreenCTM();
+  if(!ctm) return {x:0,y:0};
+  const local=pt.matrixTransform(ctm.inverse());
+  return {
+    x: clamp01(local.x / documentState.canvas.width),
+    y: clamp01(local.y / documentState.canvas.height)
+  };
+}
+function getElementBBox(e){
+  if(!e) return null;
+  if(['rectangle','ellipse','triangle','trapezoid','dot_grid','dot_cluster','line_group','grid_pattern','triangle_pattern'].includes(e.type)){
+    const x=num(e.x), y=num(e.y), width=Math.max(0,num(e.width)), height=Math.max(0,num(e.height));
+    return {x,y,width,height,cx:x+width/2,cy:y+height/2,left:x,top:y,right:x+width,bottom:y+height};
+  }
+  if(['dot','circle','hollow_dot'].includes(e.type)){
+    const r=Math.max(0,num(e.radius)); const x=num(e.x)-r, y=num(e.y)-r, width=r*2, height=r*2;
+    return {x,y,width,height,cx:num(e.x),cy:num(e.y),left:x,top:y,right:x+width,bottom:y+height};
+  }
+  if(e.type==='line'){
+    const left=Math.min(num(e.x1),num(e.x2)), right=Math.max(num(e.x1),num(e.x2));
+    const top=Math.min(num(e.y1),num(e.y2)), bottom=Math.max(num(e.y1),num(e.y2));
+    const width=right-left, height=bottom-top;
+    return {x:left,y:top,width,height,cx:left+width/2,cy:top+height/2,left,top,right,bottom};
+  }
+  if(['polyline','curve_line'].includes(e.type)){
+    const pts=(e.points||[]); if(!pts.length) return null;
+    const xs=pts.map(p=>num(p[0])), ys=pts.map(p=>num(p[1]));
+    const left=Math.min(...xs), right=Math.max(...xs), top=Math.min(...ys), bottom=Math.max(...ys);
+    const width=right-left, height=bottom-top;
+    return {x:left,y:top,width,height,cx:left+width/2,cy:top+height/2,left,top,right,bottom};
+  }
+  return null;
+}
+function selectionBBox(e){
+  if(!documentState) return null;
+  const bbox=getElementBBox(e); if(!bbox) return null;
+  const c=documentState.canvas;
+  return {x:nX(bbox.x,c.width), y:nY(bbox.y,c.height), w:nX(bbox.width,c.width), h:nY(bbox.height,c.height)};
+}
+function canResizeElement(e){ return !['line','polyline','curve_line'].includes(e.type); }
+function applyResizeFromBBox(e,next){
+  if(['dot','circle','hollow_dot'].includes(e.type)){
+    const r=Math.max(0.005,Math.min(next.width,next.height)/2);
+    e.x=clamp01(next.x+next.width/2); e.y=clamp01(next.y+next.height/2); e.radius=r; return;
+  }
+  e.x=clamp01(next.x); e.y=clamp01(next.y); e.width=Math.max(0.01,next.width); e.height=Math.max(0.01,next.height);
+}
+function renderSelectionOverlay(){ const g=$('selection-overlay'); g.innerHTML=''; const e=getSelected(); if(!e) return; const box=selectionBBox(e); if(!box) return; if(e.type==='line'){ const c=documentState.canvas; const x1=nX(num(e.x1),c.width), y1=nY(num(e.y1),c.height), x2=nX(num(e.x2),c.width), y2=nY(num(e.y2),c.height); const seg=create('line'); seg.setAttribute('x1',x1); seg.setAttribute('y1',y1); seg.setAttribute('x2',x2); seg.setAttribute('y2',y2); seg.setAttribute('stroke','rgba(37,99,235,0.9)'); seg.setAttribute('stroke-width','2'); seg.setAttribute('stroke-dasharray','8,5'); g.appendChild(seg); [['start',x1,y1],['end',x2,y2]].forEach(([endpoint,x,y])=>{ const h=create('circle'); h.setAttribute('cx',x); h.setAttribute('cy',y); h.setAttribute('r',6); h.setAttribute('fill','#fff'); h.setAttribute('stroke','#1d4ed8'); h.dataset.handle='line-endpoint'; h.dataset.endpoint=endpoint; h.style.pointerEvents='all'; h.style.cursor='move'; g.appendChild(h); }); } else { const r=create('rect'); r.setAttribute('x',box.x-4); r.setAttribute('y',box.y-4); r.setAttribute('width',Math.max(8,box.w+8)); r.setAttribute('height',Math.max(8,box.h+8)); r.setAttribute('fill','none'); r.setAttribute('stroke','rgba(37,99,235,0.9)'); r.setAttribute('stroke-width','2'); r.setAttribute('stroke-dasharray','8,5'); g.appendChild(r); if(canResizeElement(e)){ const hs=[['nwse',box.x,box.y,'tl'],['nesw',box.x+box.w,box.y,'tr'],['nesw',box.x,box.y+box.h,'bl'],['nwse',box.x+box.w,box.y+box.h,'br']]; hs.forEach(([cur,x,y,k])=>{ const h=create('rect'); h.setAttribute('x',x-5);h.setAttribute('y',y-5);h.setAttribute('width',10);h.setAttribute('height',10);h.setAttribute('fill','#fff');h.setAttribute('stroke','#1d4ed8'); h.dataset.handle='resize'; h.dataset.corner=k; h.style.pointerEvents='all'; h.style.cursor=`${cur}-resize`; g.appendChild(h); }); } } const rh=create('circle'); rh.setAttribute('cx',box.x+box.w/2); rh.setAttribute('cy',box.y-26); rh.setAttribute('r',7); rh.setAttribute('fill','#fff'); rh.setAttribute('stroke','#1d4ed8'); rh.dataset.handle='rotate'; rh.style.pointerEvents='all'; rh.style.cursor='grab'; g.appendChild(rh); }
+function setSelected(id){ selectedId=id; renderAll(); } function syncAndRender(){ updateTextarea(); renderAll(); } function updateElementById(id, updater){ if(!documentState) return; const i=documentState.elements.findIndex(e=>e.id===id); if(i<0) return; updater(documentState.elements[i]); }
+function applyDrag(id, dx, dy){ const c=documentState.canvas; const nx=dx/c.width, ny=dy/c.height; updateElementById(id, (e)=>{ if(['dot','hollow_dot','circle'].includes(e.type)){ e.x=clamp01(num(e.x)+nx); e.y=clamp01(num(e.y)+ny); } else if(['ellipse','rectangle','triangle','trapezoid','dot_grid','dot_cluster','line_group','grid_pattern','triangle_pattern'].includes(e.type)){ e.x=clamp01(num(e.x)+nx); e.y=clamp01(num(e.y)+ny); } else if(e.type==='line'){ e.x1=clamp01(num(e.x1)+nx); e.y1=clamp01(num(e.y1)+ny); e.x2=clamp01(num(e.x2)+nx); e.y2=clamp01(num(e.y2)+ny); } else if(['polyline','curve_line'].includes(e.type)){ e.points=(e.points||[]).map(p=>[clamp01(num(p[0])+nx),clamp01(num(p[1])+ny)]); } }); }
+function bindCanvasInteractions(){
+  const svg=$('canvas');
+  svg.addEventListener('pointerdown',(ev)=>{
+    const h=ev.target?.dataset?.handle;
+    if(h){
+      const e=getSelected();
+      const bbox=e&&getElementBBox(e);
+      if(!e||!bbox) return;
+      const mouse=getMouseNormalized(ev);
+      transformState={
+        mode:h,
+        corner:ev.target.dataset.corner,
+        id:e.id,
+        startX:ev.clientX,
+        startY:ev.clientY,
+        bbox,
+        mouseStart:mouse,
+        startRotation:num(e.rotation,0),
+        startAngle:Math.atan2(mouse.y-bbox.cy,mouse.x-bbox.cx),
+        endpoint:ev.target.dataset.endpoint
+      };
+      return;
+    }
+    const hit = ev.target?.closest?.('[data-id]');
+    const id = hit?.dataset?.id;
+    if(!id){ selectedId=null; renderAll(); return; }
+    setSelected(id);
+    dragState={id,startX:ev.clientX,startY:ev.clientY};
+    svg.setPointerCapture(ev.pointerId);
+  });
+
+  svg.addEventListener('pointermove',(ev)=>{
+    if(transformState&&documentState){
+      const mouse=getMouseNormalized(ev);
+      updateElementById(transformState.id,(e)=>{
+        if(transformState.mode==='rotate'){
+          const ang=Math.atan2(mouse.y-transformState.bbox.cy,mouse.x-transformState.bbox.cx);
+          e.rotation=transformState.startRotation+((ang-transformState.startAngle)*DEG);
+          return;
+        }
+        if(transformState.mode==='line-endpoint' && e.type==='line'){ const ex=clamp01(mouse.x), ey=clamp01(mouse.y); if(transformState.endpoint==='start'){ e.x1=ex; e.y1=ey; } else { e.x2=ex; e.y2=ey; } return; }
+        if(transformState.mode==='resize'){
+          if(!canResizeElement(e)) return;
+          const old=transformState.bbox;
+          const minSize=0.01;
+          let next={x:old.x,y:old.y,width:old.width,height:old.height};
+          if(transformState.corner==='tl'){ next={x:mouse.x,y:mouse.y,width:old.right-mouse.x,height:old.bottom-mouse.y}; }
+          if(transformState.corner==='tr'){ next={x:old.left,y:mouse.y,width:mouse.x-old.left,height:old.bottom-mouse.y}; }
+          if(transformState.corner==='bl'){ next={x:mouse.x,y:old.top,width:old.right-mouse.x,height:mouse.y-old.top}; }
+          if(transformState.corner==='br'){ next={x:old.left,y:old.top,width:mouse.x-old.left,height:mouse.y-old.top}; }
+          next.width=Math.max(minSize,next.width);
+          next.height=Math.max(minSize,next.height);
+          next.x=clamp01(next.x);
+          next.y=clamp01(next.y);
+          if(next.x+next.width>1) next.width=Math.max(minSize,1-next.x);
+          if(next.y+next.height>1) next.height=Math.max(minSize,1-next.y);
+          applyResizeFromBBox(e,next);
+        }
+      });
+      syncAndRender();
+      return;
+    }
+
+    if(!dragState || !documentState) return;
+    const dx=ev.clientX-dragState.startX, dy=ev.clientY-dragState.startY;
+    if(Math.abs(dx)+Math.abs(dy)<1) return;
+    applyDrag(dragState.id, dx, dy);
+    dragState.startX=ev.clientX;
+    dragState.startY=ev.clientY;
+    syncAndRender();
+  });
+
+  svg.addEventListener('pointerup',()=>{ dragState=null; transformState=null; });
+}
+function editableFieldsByType(e){ const common=['role','opacity','z_index']; const map={ dot:['x','y','radius','fill'], circle:['x','y','radius','fill'], hollow_dot:['x','y','radius','stroke','stroke_width'], ellipse:['x','y','width','height','rotation','fill'], rectangle:['x','y','width','height','rotation','fill'], triangle:['x','y','width','height','triangle_kind','rotation','fill'], trapezoid:['x','y','width','height','top_ratio','rotation','fill'], line:['x1','y1','x2','y2','stroke','stroke_width','style'], polyline:['points'], curve_line:['points'], line_group:['x','y','width','height','line_count','angle','spacing','rotation','stroke','stroke_width'], dot_grid:['x','y','width','height','rows','cols','dot_radius','rotation','fill'], dot_cluster:['x','y','width','height','count','size_min','size_max','randomness','rotation','fill'], grid_pattern:['x','y','width','height','rows','cols','rotation','stroke','stroke_width'], triangle_pattern:['x','y','width','height','count','size_min','size_max','distribution','rotation','fill'] }; return [...common, ...(map[e.type]||[])]; }
+function renderPropertyPanel(){ const panel=$('property-panel'); const info=$('selection-info'); panel.innerHTML=''; const e=getSelected(); if(!e){ info.textContent='未选中对象'; return; } info.textContent=`id=${e.id}, type=${e.type}`; const fields=editableFieldsByType(e); const addRow=(k,v,readonly=false)=>{ const row=document.createElement('div'); row.className='form-row'; const l=document.createElement('label'); l.textContent=k; let input; if(readonly){ input=document.createElement('input'); input.readOnly=true; input.value=typeof v==='object'?JSON.stringify(v):String(v??''); } else if(k==='role'||k==='fill'||k==='stroke'||k==='style'||k==='triangle_kind'||k==='distribution'||k==='points'){ input=document.createElement('input'); input.value=typeof v==='object'?JSON.stringify(v):String(v??''); } else { input=document.createElement('input'); input.type='number'; input.step='any'; input.value=String(v??0); } input.onchange=()=>{ updateElementById(e.id,(obj)=>{ if(k==='points'){ try{ obj[k]=JSON.parse(input.value);}catch{return;} } else if(input.type==='number'){ obj[k]=num(input.value); } else { obj[k]=input.value; } if(['x','y','x1','y1','x2','y2','width','height','radius','top_ratio'].includes(k)){ obj[k]=clamp01(obj[k]); } }); syncAndRender(); }; row.appendChild(l); row.appendChild(input); panel.appendChild(row); }; addRow('id',e.id,true); addRow('type',e.type,true); fields.forEach(f=>{ if(!['id','type'].includes(f)) addRow(f,e[f],false); }); }
+function deleteSelected(){ if(!documentState||!selectedId) return; documentState.elements=documentState.elements.filter(e=>e.id!==selectedId); selectedId=null; syncAndRender(); }
+function duplicateSelected(){ const e=getSelected(); if(!e||!documentState) return; const cp=deepCopy(e); cp.id=genId(e.type); cp.z_index=num(e.z_index)+1; if('x' in cp) cp.x=clamp01(num(cp.x)+0.02); if('y' in cp) cp.y=clamp01(num(cp.y)+0.02); if('x1' in cp){ cp.x1=clamp01(num(cp.x1)+0.02); cp.y1=clamp01(num(cp.y1)+0.02); cp.x2=clamp01(num(cp.x2)+0.02); cp.y2=clamp01(num(cp.y2)+0.02);} if(cp.points) cp.points=cp.points.map(p=>[clamp01(num(p[0])+0.02),clamp01(num(p[1])+0.02)]); documentState.elements.push(cp); selectedId=cp.id; syncAndRender(); }
+function shiftZ(step){ const e=getSelected(); if(!e) return; e.z_index=num(e.z_index)+step; syncAndRender(); }
+function defaultObject(type){ const z=Math.max(0,...(documentState.elements||[]).map(e=>num(e.z_index)))+1; const base={id:genId(type), type, role:'middle', opacity:1, z_index:z}; if(type==='circle') return {...base, x:0.45,y:0.45,radius:0.08,fill:'#60a5fa'}; if(type==='rectangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.16,rotation:0,fill:'#f59e0b'}; if(type==='triangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.18,triangle_kind:'isosceles',rotation:0,fill:'#34d399'}; if(type==='line') return {...base, x1:0.35,y1:0.35,x2:0.65,y2:0.55,stroke:'#111827',stroke_width:0.004,style:'solid'}; return {...base, x:0.5,y:0.5,radius:0.03,fill:'#ef4444'}; }
+function addObject(){ if(!documentState) return; const t=$('add-type').value; const obj=defaultObject(t); documentState.elements.push(obj); selectedId=obj.id; syncAndRender(); }
+async function validatePayload(payload){ const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return resp.json(); }
+function formatValidationErrors(val){
+  const details = val.errors || val;
+  return `${val.message || 'JSON 不合法'}\n${JSON.stringify(details, null, 2)}`;
+}
+async function applyFromTextarea(){
+  let payload;
+  try{
+    payload = JSON.parse($('json').value);
+  } catch(err){
+    setMessage('', `解析失败: ${err.message}`);
+    return false;
+  }
+
+  let val;
+  try{
+    val = await validatePayload(payload);
+  } catch(err){
+    setMessage('', `校验失败: ${err.message}`);
+    return false;
+  }
+
+  if(!val.valid){
+    setMessage('', formatValidationErrors(val));
+    return false;
+  }
+
+  try{
+    documentState = payload;
+    selectedId = null;
+    syncAndRender();
+    setMessage(`JSON 合法，元素 ${val.element_count} 个`, '');
+    return true;
+  } catch(err){
+    setMessage('', `渲染失败: ${err.message}`);
+    return false;
+  }
+}
+function clearCanvas(){ documentState=null; selectedId=null; $('scene').innerHTML=''; $('selection-overlay').innerHTML=''; $('element-list').innerHTML=''; $('property-panel').innerHTML=''; $('selection-info').textContent='未选中对象'; $('count').textContent='0'; setMessage('',''); }
+$('workflow-generate').onclick=generateByWorkflow;
+$('load').onclick=async()=>{ const r=await fetch('/static/examples/composition_param_sample.json'); const data=await r.json(); $('json').value=JSON.stringify(data,null,2); setMessage('示例 JSON 已加载',''); };
+$('render').onclick=applyFromTextarea; $('apply').onclick=applyFromTextarea; $('clear').onclick=clearCanvas;
+$('delete-object').onclick=deleteSelected; $('duplicate-object').onclick=duplicateSelected; $('bring-forward').onclick=()=>shiftZ(1); $('send-backward').onclick=()=>shiftZ(-1); $('add-object').onclick=addObject;
+bindCanvasInteractions();
+</script>
+</body>
+</html>
