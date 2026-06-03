@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -10,7 +11,7 @@ from typing import Any, Callable
 from PIL import Image
 from pydantic import ValidationError
 
-from app.schemas.composition_param_models import CompositionParamDocument, SUPPORTED_TYPES
+from app.schemas.composition_param_models import CompositionElement, CompositionParamDocument, HEX_COLOR_PATTERN, SUPPORTED_ROLES, SUPPORTED_TYPES
 from app.services.qwen_client import image_to_data_url
 
 DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -182,6 +183,178 @@ class QwenParamClient:
 
 qwen_client = QwenParamClient()
 
+
+
+CSS_COLOR_NAMES = {
+    "black": "#000000",
+    "white": "#FFFFFF",
+    "red": "#FF0000",
+    "green": "#008000",
+    "blue": "#0000FF",
+    "yellow": "#FFFF00",
+    "orange": "#FFA500",
+    "purple": "#800080",
+    "pink": "#FFC0CB",
+    "brown": "#A52A2A",
+    "gray": "#808080",
+    "grey": "#808080",
+    "cyan": "#00FFFF",
+    "magenta": "#FF00FF",
+    "transparent": "#FFFFFF",
+}
+
+
+def normalize_color_value(value: Any) -> str | None:
+    """Return #RRGGBB for supported color names and hex values, or None if unfixable."""
+    if not isinstance(value, str):
+        return None
+    color = value.strip()
+    if not color:
+        return None
+    named = CSS_COLOR_NAMES.get(color.lower())
+    if named:
+        return named
+    if re.match(r"^[0-9A-Fa-f]{6}$", color):
+        color = f"#{color}"
+    short_hex = re.match(r"^#?([0-9A-Fa-f]{3})$", color)
+    if short_hex:
+        chars = short_hex.group(1)
+        return "#" + "".join(ch * 2 for ch in chars).upper()
+    if HEX_COLOR_PATTERN.match(color):
+        return color.upper()
+    return None
+
+
+def _normalize_color_field(element: dict[str, Any], key: str, warnings: list[str], index: int) -> None:
+    if key not in element:
+        return
+    normalized = normalize_color_value(element[key])
+    if normalized is None:
+        return
+    if element[key] != normalized:
+        _warning(warnings, index, f"normalized {key}: {element[key]!r} -> {normalized!r}")
+    element[key] = normalized
+
+
+def _sanitize_known_element_fields(element: dict[str, Any], warnings: list[str], index: int) -> None:
+    role = element.get("role")
+    if role not in SUPPORTED_ROLES:
+        _warning(warnings, index, f"normalized invalid role: {role!r} -> 'unknown'")
+        element["role"] = "unknown"
+    if "opacity" not in element:
+        element["opacity"] = 1
+        _warning(warnings, index, "filled default opacity=1")
+    if "z_index" not in element:
+        element["z_index"] = index
+        _warning(warnings, index, f"filled default z_index={index}")
+    element_type = element.get("type")
+    if element_type == "triangle" and element.get("triangle_kind") not in {"equilateral", "acute", "obtuse"}:
+        _warning(warnings, index, f"normalized triangle_kind: {element.get('triangle_kind')!r} -> 'equilateral'")
+        element["triangle_kind"] = "equilateral"
+    if element_type in {"line", "polyline", "curve_line"} and element.get("style") not in {"solid", "dashed"}:
+        _warning(warnings, index, f"normalized style: {element.get('style')!r} -> 'solid'")
+        element["style"] = "solid"
+    if element_type == "triangle_pattern" and element.get("distribution") not in {"regular", "scattered"}:
+        _warning(warnings, index, f"normalized distribution: {element.get('distribution')!r} -> 'scattered'")
+        element["distribution"] = "scattered"
+    for color_key in ("fill", "stroke"):
+        _normalize_color_field(element, color_key, warnings, index)
+
+
+def sanitize_composition_document(payload: dict[str, Any]) -> dict[str, Any]:
+    """Clean each element independently so one bad element does not invalidate the document."""
+    strict_validation: dict[str, Any]
+    try:
+        strict_document = CompositionParamDocument.model_validate(payload)
+        strict_validation = {"valid": True, "errors": []}
+    except ValidationError as exc:
+        strict_validation = {"valid": False, "errors": format_validation_errors(exc)}
+
+    if not isinstance(payload, dict):
+        return {
+            "valid": False,
+            "message": "JSON 不合法",
+            "document": None,
+            "element_count": 0,
+            "warnings": [],
+            "dropped_elements": [{"index": None, "element": payload, "reason": "document must be a JSON object"}],
+            "strict_validation": strict_validation,
+        }
+
+    warnings: list[str] = []
+    original_elements = payload.get("elements")
+    original_missing_opacity = [isinstance(element, dict) and "opacity" not in element and "alpha" not in element for element in original_elements] if isinstance(original_elements, list) else []
+    original_missing_z_index = [isinstance(element, dict) and "z_index" not in element and "layer" not in element and "z" not in element for element in original_elements] if isinstance(original_elements, list) else []
+    normalized = normalize_composition_param_payload(payload, warnings)
+    elements = normalized.get("elements")
+    if not isinstance(elements, list):
+        return {
+            "valid": False,
+            "message": "JSON 不合法",
+            "document": None,
+            "element_count": 0,
+            "warnings": warnings,
+            "dropped_elements": [{"index": None, "element": elements, "reason": "elements must be a list"}],
+            "strict_validation": strict_validation,
+        }
+
+    cleaned_elements: list[dict[str, Any]] = []
+    dropped_elements: list[dict[str, Any]] = []
+    for index, raw_element in enumerate(elements):
+        if not isinstance(raw_element, dict):
+            dropped_elements.append({"index": index, "element": raw_element, "reason": "element must be a JSON object"})
+            continue
+        element = json.loads(json.dumps(raw_element))
+        if index < len(original_missing_opacity) and original_missing_opacity[index] and element.get("opacity") != 1:
+            _warning(warnings, index, f"normalized missing opacity: {element.get('opacity')!r} -> 1")
+            element["opacity"] = 1
+        if index < len(original_missing_z_index) and original_missing_z_index[index] and element.get("z_index") != index:
+            _warning(warnings, index, f"normalized missing z_index: {element.get('z_index')!r} -> {index}")
+            element["z_index"] = index
+        _sanitize_known_element_fields(element, warnings, index)
+        try:
+            cleaned = CompositionElement.model_validate(element).model_dump()
+        except ValidationError as exc:
+            dropped_elements.append({"index": index, "element": raw_element, "reason": "; ".join(error["message"] for error in format_validation_errors(exc))})
+            continue
+        cleaned_elements.append(cleaned)
+
+    cleaned_document = json.loads(json.dumps(normalized))
+    cleaned_document["elements"] = cleaned_elements
+    if not cleaned_elements:
+        return {
+            "valid": False,
+            "message": "JSON 不合法：清洗后没有可渲染元素",
+            "document": None,
+            "element_count": 0,
+            "warnings": warnings,
+            "dropped_elements": dropped_elements,
+            "strict_validation": strict_validation,
+        }
+
+    try:
+        document = CompositionParamDocument.model_validate(cleaned_document)
+    except ValidationError as exc:
+        return {
+            "valid": False,
+            "message": "JSON 不合法",
+            "document": None,
+            "element_count": 0,
+            "warnings": warnings,
+            "dropped_elements": dropped_elements,
+            "strict_validation": strict_validation,
+            "errors": format_validation_errors(exc),
+        }
+    dumped = document.model_dump()
+    return {
+        "valid": True,
+        "message": "JSON 合法",
+        "document": dumped,
+        "element_count": len(dumped["elements"]),
+        "warnings": warnings,
+        "dropped_elements": dropped_elements,
+        "strict_validation": strict_validation,
+    }
 
 def extract_json_payload(raw_text: str) -> Any:
     """Extract a JSON value from Qwen output while tolerating accidental prose or fences."""
