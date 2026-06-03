@@ -111,11 +111,20 @@ function getSelected(){ return (documentState?.elements || []).find(e => e.id ==
 function genId(prefix='el'){ return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`; }
 function updateTextarea(){ if(documentState){ $('json').value = JSON.stringify(documentState, null, 2); } }
 function setMessage(ok, err=''){ $('success').textContent = ok || ''; $('errors').textContent = err || ''; }
+function updateCanvasMeta(doc){
+  const canvas = doc?.canvas || {};
+  const width = num(canvas.width, 1000);
+  const height = num(canvas.height, 1000);
+  const background = canvas.background || '#FFFFFF';
+  $('canvas-meta').textContent = `canvas: ${width}x${height}, background: ${background}`;
+  $('canvas').setAttribute('viewBox', `0 0 ${width} ${height}`);
+  $('canvas').style.background = background;
+}
 const { known, makeShapeNode } = window.CompositionParamRenderer;
 function renderAll(){
   const scene = $('scene'); scene.innerHTML=''; $('selection-overlay').innerHTML='';
   if(!documentState){ $('count').textContent='0'; return; }
-  setMeta(documentState);
+  updateCanvasMeta(documentState);
   const sorted=getElementsSorted();
   sorted.forEach(e=>{ if(known.has(e.type)){ const n=makeShapeNode(e,documentState.canvas); if(n) scene.appendChild(n);} });
   $('count').textContent = String(sorted.length);
@@ -259,8 +268,40 @@ function shiftZ(step){ const e=getSelected(); if(!e) return; e.z_index=num(e.z_i
 function defaultObject(type){ const z=Math.max(0,...(documentState.elements||[]).map(e=>num(e.z_index)))+1; const base={id:genId(type), type, role:'middle', opacity:1, z_index:z}; if(type==='circle') return {...base, x:0.45,y:0.45,radius:0.08,fill:'#60a5fa'}; if(type==='rectangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.16,rotation:0,fill:'#f59e0b'}; if(type==='triangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.18,triangle_kind:'isosceles',rotation:0,fill:'#34d399'}; if(type==='line') return {...base, x1:0.35,y1:0.35,x2:0.65,y2:0.55,stroke:'#111827',stroke_width:0.004,style:'solid'}; return {...base, x:0.5,y:0.5,radius:0.03,fill:'#ef4444'}; }
 function addObject(){ if(!documentState) return; const t=$('add-type').value; const obj=defaultObject(t); documentState.elements.push(obj); selectedId=obj.id; syncAndRender(); }
 async function validatePayload(payload){ const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return resp.json(); }
-async function applyFromTextarea(){ try{ const payload=JSON.parse($('json').value); const val=await validatePayload(payload); if(!val.valid){ setMessage('', JSON.stringify(val.errors||val,null,2)); return false; } documentState=payload; selectedId=null; setMessage(`JSON 合法，元素 ${val.element_count} 个`,''); syncAndRender(); return true; } catch(err){ setMessage('',`解析失败: ${err.message}`); return false; } }
-function clearCanvas(){ documentState=null; selectedId=null; $('scene').innerHTML=''; $('selection-overlay').innerHTML=''; $('element-list').innerHTML=''; $('property-panel').innerHTML=''; $('selection-info').textContent='未选中对象'; $('count').textContent='0'; setMessage('',''); }
+async function applyFromTextarea(){
+  let payload;
+  try{
+    payload=JSON.parse($('json').value);
+  } catch(err){
+    setMessage('',`解析失败: ${err.message}`);
+    return false;
+  }
+
+  let val;
+  try{
+    val=await validatePayload(payload);
+  } catch(err){
+    setMessage('',`校验失败: ${err.message}`);
+    return false;
+  }
+
+  if(!val.valid){
+    setMessage('', JSON.stringify(val.errors||val,null,2));
+    return false;
+  }
+
+  try{
+    documentState=payload;
+    selectedId=null;
+    syncAndRender();
+    setMessage(`JSON 合法，元素 ${val.element_count} 个`,'');
+    return true;
+  } catch(err){
+    setMessage('',`渲染失败: ${err.message}`);
+    return false;
+  }
+}
+function clearCanvas(){ documentState=null; selectedId=null; $('scene').innerHTML=''; $('selection-overlay').innerHTML=''; $('element-list').innerHTML=''; $('property-panel').innerHTML=''; $('selection-info').textContent='未选中对象'; $('count').textContent='0'; $('canvas-meta').textContent='canvas: 800x800, background: #FFFFFF'; $('canvas').setAttribute('viewBox','0 0 1000 1000'); $('canvas').style.background='#fff'; setMessage('',''); }
 $('load').onclick=async()=>{ const r=await fetch('/static/examples/composition_param_sample.json'); const data=await r.json(); $('json').value=JSON.stringify(data,null,2); setMessage('示例 JSON 已加载',''); };
 $('render').onclick=applyFromTextarea; $('apply').onclick=applyFromTextarea; $('clear').onclick=clearCanvas;
 $('delete-object').onclick=deleteSelected; $('duplicate-object').onclick=duplicateSelected; $('bring-forward').onclick=()=>shiftZ(1); $('send-backward').onclick=()=>shiftZ(-1); $('add-object').onclick=addObject;

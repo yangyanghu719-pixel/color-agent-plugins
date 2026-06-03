@@ -115,6 +115,31 @@ def test_sample_json_exists_and_has_required_fields():
         assert "z_index" in element
 
 
+
+def test_param_test_page_render_flow_regression_controls():
+    resp = client.get("/composition-param-test")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "setMeta(" not in text
+    assert 'id="render"' in text
+    assert 'id="apply"' in text
+    assert 'id="errors"' in text
+    assert 'id="success"' in text
+    assert "解析失败" in text
+    assert "渲染失败" in text
+
+
+def test_param_test_page_has_validation_controls_for_valid_payload():
+    validate_resp = client.post("/composition/validate-param-json", json=_sample_json())
+    assert validate_resp.status_code == 200
+    assert validate_resp.json()["valid"] is True
+
+    page_resp = client.get("/composition-param-test")
+    assert page_resp.status_code == 200
+    assert "渲染 JSON" in page_resp.text
+    assert "校验/渲染信息" in page_resp.text
+    assert "fetch('/composition/validate-param-json'" in page_resp.text
+
 def test_param_test_page_has_add_object_controls():
     resp = client.get("/composition-param-test")
     assert resp.status_code == 200
