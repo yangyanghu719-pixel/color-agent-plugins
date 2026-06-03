@@ -77,20 +77,86 @@ def test_validate_param_json_valid_sample():
     assert body["element_count"] >= 10
 
 
-def test_validate_param_json_invalid_type():
+def test_validate_param_json_drops_invalid_element_without_blocking_document():
     payload = _sample_json()
+    original_count = len(payload["elements"])
     payload["elements"][0]["type"] = "bad_type"
     resp = client.post("/composition/validate-param-json", json=payload)
     assert resp.status_code == 200
-    assert resp.json()["valid"] is False
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["element_count"] == original_count - 1
+    assert body["dropped_elements"][0]["index"] == 0
+    assert body["strict_validation"]["valid"] is False
 
 
-def test_validate_param_json_out_of_range():
+def test_validate_param_json_sanitizes_repairable_element_fields():
     payload = _sample_json()
-    payload["elements"][0]["x"] = 1.5
+    payload["elements"] = [
+        {
+            "id": "bad-but-fixable",
+            "type": "triangle",
+            "role": "middle",
+            "x": 1.5,
+            "y": "0.2",
+            "width": 0.3,
+            "height": 0.4,
+            "triangle_kind": "isosceles",
+            "fill": "#0f8",
+        },
+        {
+            "id": "line-style-fixable",
+            "type": "line",
+            "x1": 0.1,
+            "y1": 0.2,
+            "x2": 0.7,
+            "y2": 0.8,
+            "stroke": "blue",
+            "stroke_width": 0.01,
+            "style": "dotted",
+        },
+        {
+            "id": "triangle-pattern-fixable",
+            "type": "triangle_pattern",
+            "x": 0.1,
+            "y": 0.1,
+            "width": 0.4,
+            "height": 0.4,
+            "count": 3,
+            "size_min": 0.02,
+            "size_max": 0.05,
+            "distribution": "clustered",
+            "fill": "00ff00",
+        },
+    ]
     resp = client.post("/composition/validate-param-json", json=payload)
     assert resp.status_code == 200
-    assert resp.json()["valid"] is False
+    body = resp.json()
+    assert body["valid"] is True
+    cleaned = body["document"]["elements"][0]
+    assert cleaned["role"] == "unknown"
+    assert cleaned["x"] == 1
+    assert cleaned["opacity"] == 1
+    assert cleaned["z_index"] == 0
+    assert cleaned["triangle_kind"] == "equilateral"
+    assert cleaned["fill"] == "#00FF88"
+    assert body["document"]["elements"][1]["style"] == "solid"
+    assert body["document"]["elements"][1]["stroke"] == "#0000FF"
+    assert body["document"]["elements"][2]["distribution"] == "scattered"
+    assert body["document"]["elements"][2]["fill"] == "#00FF00"
+    assert body["warnings"]
+    assert body["strict_validation"]["valid"] is False
+
+
+def test_validate_param_json_invalid_when_all_elements_dropped():
+    payload = _sample_json()
+    payload["elements"] = [{"id": "bad", "type": "bad_type"}]
+    resp = client.post("/composition/validate-param-json", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert body["document"] is None
+    assert body["dropped_elements"][0]["index"] == 0
 
 
 

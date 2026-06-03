@@ -360,6 +360,13 @@ function formatValidationErrors(val){
   const details = val.errors || val;
   return `${val.message || 'JSON 不合法'}\n${JSON.stringify(details, null, 2)}`;
 }
+function formatSanitizeDebug(val){
+  const lines = [];
+  if((val.warnings || []).length) lines.push(`清洗修复 ${val.warnings.length} 项:\n${val.warnings.join('\n')}`);
+  if((val.dropped_elements || []).length) lines.push(`丢弃元素 ${val.dropped_elements.length} 个:\n${JSON.stringify(val.dropped_elements, null, 2)}`);
+  if(val.strict_validation && !val.strict_validation.valid) lines.push(`严格校验未通过（仅作 debug，不阻止清洗后元素渲染）:\n${JSON.stringify(val.strict_validation.errors || [], null, 2)}`);
+  return lines.join('\n\n');
+}
 async function applyFromTextarea(){
   let payload;
   try{
@@ -383,10 +390,11 @@ async function applyFromTextarea(){
   }
 
   try{
-    documentState = payload;
+    documentState = val.document;
     selectedId = null;
     syncAndRender();
-    setMessage(`JSON 合法，元素 ${val.element_count} 个`, '');
+    const debug = formatSanitizeDebug(val);
+    setMessage(`JSON 合法，已渲染清洗后元素 ${val.element_count} 个`, debug);
     return true;
   } catch(err){
     setMessage('', `渲染失败: ${err.message}`);

@@ -9,10 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
-from app.schemas.composition_param_models import CompositionParamDocument
-from app.services.composition_param_generation_service import format_validation_errors
+from app.services.composition_param_generation_service import sanitize_composition_document
 
 JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
@@ -55,16 +52,23 @@ class WorkflowGenerationResult:
     raw_text: str
     document: dict[str, Any]
     textarea_json: str
+    warnings: list[str]
+    dropped_elements: list[dict[str, Any]]
+    strict_validation: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "ok": True,
+            "valid": True,
             "message": self.message,
             "image_url": self.image_url,
             "raw_workflow_response": self.raw_workflow_response,
             "raw_text": self.raw_text,
             "document": self.document,
             "textarea_json": self.textarea_json,
+            "warnings": self.warnings,
+            "dropped_elements": self.dropped_elements,
+            "strict_validation": self.strict_validation,
         }
 
 
@@ -126,9 +130,20 @@ class AliyunWorkflowParamGenerationService:
     def generate(self, image_url: str, user_hint: str | None = None) -> WorkflowGenerationResult:
         response_json = self.call_workflow(image_url, user_hint)
         raw_text = extract_workflow_text(response_json)
-        document = extract_workflow_document(response_json, raw_text)
+        sanitized = extract_workflow_document(response_json, raw_text)
+        document = sanitized["document"]
         textarea_json = json.dumps(document, ensure_ascii=False, indent=2)
-        return WorkflowGenerationResult("生成成功", image_url, response_json, raw_text, document, textarea_json)
+        return WorkflowGenerationResult(
+            "生成成功",
+            image_url,
+            response_json,
+            raw_text,
+            document,
+            textarea_json,
+            sanitized.get("warnings", []),
+            sanitized.get("dropped_elements", []),
+            sanitized.get("strict_validation", {"valid": True, "errors": []}),
+        )
 
 
 def extract_workflow_text(response_json: Any) -> str:
@@ -183,13 +198,12 @@ def extract_workflow_document(response_json: Any, raw_text: str | None = None) -
     candidate = parsed.get("result1") if isinstance(parsed, dict) and "result1" in parsed else parsed
     if not isinstance(candidate, dict):
         raise WorkflowParseError("返回 JSON 中没有 result1 且不是合法 document", raw_workflow_response=response_json, raw_text=raw_text or "")
-    try:
-        document = CompositionParamDocument.model_validate(candidate)
-    except ValidationError as exc:
+    sanitized = sanitize_composition_document(candidate)
+    if not sanitized.get("valid"):
         raise WorkflowParseError(
-            "返回 JSON 中没有 result1 且不是合法 document",
+            sanitized.get("message") or "返回 JSON 中没有可渲染元素",
             raw_workflow_response=response_json,
             raw_text=raw_text or "",
-            errors=format_validation_errors(exc),
-        ) from exc
-    return document.model_dump()
+            errors=sanitized.get("errors") or sanitized.get("strict_validation", {}).get("errors") or [{"path": "elements", "message": "清洗后没有可渲染元素"}],
+        )
+    return sanitized

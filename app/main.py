@@ -3,19 +3,17 @@ from uuid import uuid4
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import ValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas.request_models import ExtractElementsRequest
 from app.schemas.response_models import ExtractElementsResponse, HealthResponse
 from app.services.element_extract_service import ElementExtractService, ExtractConfig, ExtractError
-from app.schemas.composition_param_models import CompositionParamDocument
 from app.services.composition_param_generation_service import (
     CompositionParamGenerationService,
     QwenConfigurationError,
     QwenRequestError,
-    format_validation_errors,
+    sanitize_composition_document,
 )
 from app.services.aliyun_workflow_param_generation_service import (
     AliyunWorkflowParamGenerationService,
@@ -131,16 +129,7 @@ def composition_workflow_test() -> HTMLResponse:
 
 @app.post("/composition/validate-param-json")
 def validate_param_json(payload: dict) -> dict:
-    try:
-        document = CompositionParamDocument.model_validate(payload)
-        return {
-            "valid": True,
-            "message": "JSON 合法",
-            "element_count": len(document.elements),
-            "warnings": [],
-        }
-    except ValidationError as exc:
-        return {"valid": False, "message": "JSON 不合法", "errors": format_validation_errors(exc), "warnings": []}
+    return sanitize_composition_document(payload)
 
 
 @app.post("/composition/generate-param-json")
