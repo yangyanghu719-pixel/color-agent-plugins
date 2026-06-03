@@ -123,6 +123,38 @@ def test_param_test_page_has_add_object_controls():
         assert t in resp.text
 
 
+
+
+def test_param_test_page_regression_render_controls_without_set_meta():
+    resp = client.get("/composition-param-test")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "setMeta(" not in text
+    assert "setCanvasMeta" in text
+    assert 'id="render"' in text
+    assert "渲染 JSON" in text
+    assert 'id="apply"' in text
+    assert "应用当前文本 JSON" in text
+    assert 'id="errors"' in text
+    assert 'id="success"' in text
+    assert "/composition/validate-param-json" in text
+    assert "渲染失败:" in text
+    assert "解析失败:" in text
+
+
+def test_param_test_page_validate_endpoint_success_supports_render_flow():
+    page = client.get("/composition-param-test")
+    assert page.status_code == 200
+    assert "校验/渲染信息" in page.text
+    assert "渲染 JSON" in page.text
+
+    resp = client.post("/composition/validate-param-json", json=_sample_json())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["element_count"] >= 1
+
+
 def test_sample_json_contains_required_pattern_types():
     payload = _sample_json()
     types = {e["type"] for e in payload["elements"]}
