@@ -4,6 +4,7 @@ import json
 from fastapi.testclient import TestClient
 
 from app.main import app
+import app.main as main
 
 client = TestClient(app)
 
@@ -296,6 +297,7 @@ def test_aliyun_app_chat_test_page_has_operation_log_controls():
     assert 'id="downloadOperationCsvBtn"' in resp.text
     assert "/aliyun-app-chat-test/operation-log" in resp.text
     assert "/aliyun-app-chat-test/operation-log.csv" in resp.text
+    assert "backend_data_storage" in resp.text
     assert "task_id" in resp.text
 
 
@@ -317,3 +319,48 @@ def test_aliyun_app_chat_test_operation_log_records_csv_row():
     assert task_id in csv_text
     assert "button_click" in csv_text
     assert "生成 JSON" in csv_text
+
+
+def test_operation_artifact_uses_reference_folder_structure(monkeypatch):
+    monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
+
+    result = main.write_operation_text_artifact("pytest-folder-001", "任务1_构图比较/构图对比分析文本.txt", "分析文本", "test commit")
+
+    assert "上传照片_pytest-folder-001" in result["local_path"]
+    assert result["repo_path"] == "backend_data_storage/上传照片_pytest-folder-001/任务1_构图比较/构图对比分析文本.txt"
+    assert result["github"]["enabled"] is False
+
+
+def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
+    monkeypatch.setenv("GITHUB_OPERATION_TOKEN", "token-test")
+    monkeypatch.setenv("GITHUB_OPERATION_REPO", "owner/repo")
+    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab")
+    calls = {}
+
+    class FakeResponse:
+        def __init__(self, status_code, text="{}"):
+            self.status_code = status_code
+            self.text = text
+
+        def json(self):
+            return {"sha": "sha-existing"}
+
+    def fake_get(url, headers, params, timeout):
+        calls["get"] = {"url": url, "headers": headers, "params": params, "timeout": timeout}
+        return FakeResponse(404)
+
+    def fake_put(url, headers, json, timeout):
+        calls["put"] = {"url": url, "headers": headers, "json": json, "timeout": timeout}
+        return FakeResponse(201, '{"content": {}}')
+
+    monkeypatch.setattr(main.requests, "get", fake_get)
+    monkeypatch.setattr(main.requests, "put", fake_put)
+
+    result = main.github_put_file("backend_data_storage/上传照片_t1/当前任务汇总.json", b"{}", "save data")
+
+    assert result["ok"] is True
+    assert calls["get"]["params"] == {"ref": "composition-lab"}
+    assert calls["put"]["json"]["branch"] == "composition-lab"
+    assert calls["put"]["json"]["content"] == "e30="
+    assert calls["put"]["headers"]["Authorization"] == "Bearer token-test"
+    assert "%E4%B8%8A%E4%BC%A0%E7%85%A7%E7%89%87_t1" in calls["put"]["url"]
