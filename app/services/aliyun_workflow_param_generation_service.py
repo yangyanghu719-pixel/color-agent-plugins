@@ -274,7 +274,7 @@ def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str,
                     if not isinstance(part, dict):
                         continue
                     part_type = part.get("type")
-                    if part_type == "image_url" and isinstance(part.get("image_url"), dict):
+                    if part_type == "image_url" and isinstance(part.get("image_url"), dict) and part["image_url"].get("url"):
                         image_part_included = True
                         image_part_field_name = "messages[].content[].image_url.url"
                     elif part_type == "image" and part.get("image"):
@@ -309,7 +309,7 @@ def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str,
 
 
 def _vision_call_mode() -> str:
-    mode = os.getenv("ALIYUN_VISION_CALL_MODE", "application").strip().lower()
+    mode = os.getenv("ALIYUN_VISION_CALL_MODE", "direct_vl").strip().lower()
     if mode not in {"application", "direct_vl"}:
         raise WorkflowConfigurationError("ALIYUN_VISION_CALL_MODE 仅支持 application 或 direct_vl")
     return mode
