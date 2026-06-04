@@ -121,8 +121,8 @@ def build_upstream_debug(
     return debug
 
 
-def _env_enabled(value: str, *, default: bool = False) -> bool:
-    normalized = value.strip().lower()
+def _env_enabled(value: str | None, *, default: bool = False) -> bool:
+    normalized = (value or "").strip().lower()
     if not normalized:
         return default
     return normalized in {"1", "true", "yes", "on"}
@@ -167,6 +167,9 @@ def build_payload_debug(
     parameters = body_dict.get("parameters") if isinstance(body_dict.get("parameters"), dict) else {}
     biz_params = input_payload.get("biz_params") if isinstance(input_payload.get("biz_params"), dict) else {}
     prompt = input_payload.get("prompt")
+    image_list_value = input_payload.get(image_field_name)
+    image_list_present = isinstance(image_list_value, list) and len(image_list_value) > 0
+    image_list_length = len(image_list_value) if isinstance(image_list_value, list) else 0
     image_input_debug = {
         "field_name": image_field_name,
         "value_type": classify_image_value(image_url),
@@ -180,15 +183,23 @@ def build_payload_debug(
     if model_input["actual_model_input_mode"] == "application_biz_params":
         warning = "图片仅作为 biz_params 传入，可能不会进入模型 multimodal context。"
     return {
+        "call_mode": "application",
         "endpoint_url": mask_app_id_in_url(endpoint_url, app_id),
+        "app_id_masked": mask_app_id(app_id),
         **model_input,
         "model_input_warning": warning,
+        "input_keys": sorted(input_payload.keys()),
         "input_top_level_keys": sorted(input_payload.keys()),
         "parameters_keys": sorted(parameters.keys()),
         "prompt_present": isinstance(prompt, str) and bool(prompt.strip()),
         "prompt_length": len(prompt) if isinstance(prompt, str) else 0,
         "biz_params_present": isinstance(input_payload.get("biz_params"), dict),
         "biz_params_keys": sorted(biz_params.keys()),
+        "image_list_present": image_list_present,
+        "image_list_length": image_list_length,
+        "custom_image_url_variable_name": image_debug.get("custom_image_url_variable_name") if image_debug else None,
+        "direct_model_bypassed": True,
+        "application_model_controlled_by_app_config": True,
         "image_input_field_name": image_field_name,
         "image_url_present": bool(image_url),
         "image_input_debug": image_input_debug,
@@ -210,7 +221,8 @@ def build_payload_debug(
         "sanitized_request_payload": {
             "input": {
                 "prompt": "<present>" if isinstance(prompt, str) and prompt else "",
-                "biz_params": {key: ("<image-url>" if key in {"imageUrl", "image", "file", "query"} else ["<image-url>"] if key == "imageList" else value) for key, value in biz_params.items()},
+                **{image_field_name: ["<image-url>"] if image_list_present else []},
+                "biz_params": _sanitize_model_input_preview(biz_params),
             },
             "parameters": parameters,
             "debug": body_dict.get("debug", {}),
@@ -239,8 +251,10 @@ def _sanitize_model_input_preview(payload: Any) -> Any:
             sanitized[key] = "<redacted>"
         elif normalized == "url" and isinstance(value, str) and value.startswith(("http://", "https://")):
             sanitized[key] = value
-        elif normalized in {"imageurl", "image", "file", "query"} and isinstance(value, str):
+        elif normalized in {"imageurl", "pic-url", "picurl", "image", "file", "query"} and isinstance(value, str):
             sanitized[key] = "<image-url>"
+        elif normalized in {"image_list", "imagelist", "file_list", "filelist"} and isinstance(value, list):
+            sanitized[key] = ["<image-url>" if isinstance(item, str) and item.startswith(("http://", "https://", "data:image/")) else _sanitize_model_input_preview(item) for item in value]
         else:
             sanitized[key] = _sanitize_model_input_preview(value)
     return sanitized
@@ -290,6 +304,17 @@ def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str,
         biz_params = input_payload.get("biz_params") if isinstance(input_payload.get("biz_params"), dict) else {}
         prompt = input_payload.get("prompt")
         text_part_included = isinstance(prompt, str) and bool(prompt.strip())
+        image_list_field_present = False
+        for key, value in input_payload.items():
+            if key == "biz_params":
+                continue
+            normalized_key = key.lower()
+            if isinstance(value, list) and (normalized_key in {"image_list", "imagelist", "file_list", "filelist"} or "image" in normalized_key):
+                image_list_field_present = len(value) > 0
+                if image_list_field_present:
+                    image_part_included = True
+                    image_part_field_name = f"input.{key}"
+                    break
         if isinstance(input_payload.get("messages"), list):
             for message in input_payload["messages"]:
                 content = message.get("content") if isinstance(message, dict) else None
@@ -298,7 +323,7 @@ def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str,
                         if isinstance(part, dict) and ("image" in part or "image_url" in part):
                             image_part_included = True
                             image_part_field_name = "input.messages[].content[]"
-        actual_mode = "multimodal_parts" if image_part_included else "application_biz_params" if biz_params else "text_only"
+        actual_mode = "application_image_list" if image_list_field_present else "multimodal_parts" if image_part_included else "application_biz_params" if biz_params else "text_only"
     return {
         "actual_model_input_mode": actual_mode,
         "image_part_included": image_part_included,
@@ -309,7 +334,7 @@ def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str,
 
 
 def _vision_call_mode() -> str:
-    mode = os.getenv("ALIYUN_VISION_CALL_MODE", "direct_vl").strip().lower()
+    mode = os.getenv("ALIYUN_VISION_CALL_MODE", "application").strip().lower()
     if mode not in {"application", "direct_vl"}:
         raise WorkflowConfigurationError("ALIYUN_VISION_CALL_MODE 仅支持 application 或 direct_vl")
     return mode
@@ -558,18 +583,27 @@ class AliyunVisionParamGenerationService:
             image_url_check = {**precomputed_image_url_check, "application_call_attempted": False}
         else:
             image_url_check = {**check_public_image_url(image_url), "application_call_attempted": False}
-        image_field_name = self._env("ALIYUN_APPLICATION_IMAGE_FIELD", default="imageUrl")
-        biz_params = {
-            "source_width": (image_debug or {}).get("source_width"),
-            "source_height": (image_debug or {}).get("source_height"),
-        }
-        if image_url:
-            biz_params.update({"imageUrl": image_url, "imageList": [image_url]})
-            if image_field_name not in biz_params:
-                biz_params[image_field_name] = image_url
-        biz_params = {key: value for key, value in biz_params.items() if value is not None}
+        image_list_field_name = self._env("ALIYUN_APPLICATION_IMAGE_LIST_FIELD", default="image_list")
+        custom_image_url_variable_name = self._env("ALIYUN_APPLICATION_IMAGE_URL_VARIABLE", default="pic-url")
+        pass_biz_params = _env_enabled(os.getenv("ALIYUN_APPLICATION_PASS_BIZ_PARAMS"), default=True)
+        pass_image_list = _env_enabled(os.getenv("ALIYUN_APPLICATION_PASS_IMAGE_LIST"), default=True)
+        source_width = (image_debug or {}).get("source_width")
+        source_height = (image_debug or {}).get("source_height")
+        input_payload: dict[str, Any] = {"prompt": prompt}
+        if image_url and pass_image_list and image_list_field_name:
+            input_payload[image_list_field_name] = [image_url]
+        if pass_biz_params:
+            biz_params = {
+                "source_width": source_width,
+                "source_height": source_height,
+            }
+            if image_url and custom_image_url_variable_name:
+                biz_params[custom_image_url_variable_name] = image_url
+            biz_params = {key: value for key, value in biz_params.items() if value is not None}
+            if biz_params:
+                input_payload["biz_params"] = biz_params
         body_dict = {
-            "input": {"prompt": prompt, "biz_params": biz_params},
+            "input": input_payload,
             "parameters": {"incremental_output": stream},
             "debug": {},
         }
@@ -577,9 +611,9 @@ class AliyunVisionParamGenerationService:
             endpoint_url=url,
             app_id=app_id,
             body_dict=body_dict,
-            image_field_name=image_field_name,
+            image_field_name=image_list_field_name,
             image_url=image_url,
-            image_debug={**(image_debug or {}), **image_url_check},
+            image_debug={**(image_debug or {}), **image_url_check, "custom_image_url_variable_name": custom_image_url_variable_name},
             attempt_count=attempt_count,
             attempt_mode="stream" if stream else "non_stream",
         )
@@ -664,6 +698,8 @@ class AliyunVisionParamGenerationService:
         body_dict = build_direct_vl_payload(prompt, image_url, model)
         model_input = inspect_model_input(body_dict, call_mode="direct_vl")
         payload_debug = {
+            "call_mode": "direct_vl",
+            "warning": "当前绕过 AppID 智能体应用，直接调用模型 API；应用内 qwen3vl-plus 配置不会生效",
             "endpoint_url": url,
             **model_input,
             "model_input_warning": None,

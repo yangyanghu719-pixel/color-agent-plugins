@@ -249,6 +249,8 @@ def composition_application_health_check() -> dict:
         "ok": "OK" in aggregation.raw_text.upper(),
         "raw_text": aggregation.raw_text,
         "raw_text_length": len(aggregation.raw_text),
+        "app_endpoint_url": aggregation.upstream_debug.get("endpoint_url"),
+        "app_id_masked": aggregation.upstream_debug.get("app_id_masked"),
         "upstream_debug": aggregation.upstream_debug,
     }
 
