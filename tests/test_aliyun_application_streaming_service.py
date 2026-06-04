@@ -186,6 +186,10 @@ def test_application_payload_contains_prompt_and_biz_params(monkeypatch):
     assert result.upstream_debug["biz_params_keys"]
     assert result.upstream_debug["image_input_debug"]["value_type"] == "URL"
     assert result.upstream_debug["token_usage"] == {"total_tokens": 12}
+    assert result.upstream_debug["actual_model_input_mode"] == "application_biz_params"
+    assert result.upstream_debug["image_part_included"] is False
+    assert result.upstream_debug["model_input_warning"] == "图片仅作为 biz_params 传入，可能不会进入模型 multimodal context。"
+    assert result.upstream_debug["model_input_preview"]["input"]["biz_params"]["imageUrl"] == "<image-url>"
 
 
 def test_image_url_unreachable_blocks_application_call(monkeypatch):
@@ -347,3 +351,95 @@ def test_public_image_url_generation_is_absolute():
 
     assert image_url == "https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png"
     assert not image_url.startswith("/static/")
+
+
+def _set_direct_vl_env(monkeypatch):
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "direct_vl")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "key")
+    monkeypatch.setenv("ALIYUN_DASHSCOPE_BASE_URL", "https://dashscope.example.com/compatible-mode/v1")
+    monkeypatch.setenv("ALIYUN_VISION_MODEL", "qwen-vl-plus")
+
+
+def test_direct_vl_payload_contains_image_url_part(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_direct_vl_env(monkeypatch)
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12},
+    )
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeJsonResponse({"choices": [{"message": {"content": json.dumps(_sample_json(), ensure_ascii=False)}, "finish_reason": "stop"}], "usage": {"total_tokens": 21}})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.call_workflow("https://public.example.com/a.png", user_hint="转译图像", image_debug={"image_size_bytes": 12})
+
+    content = captured["payload"]["messages"][0]["content"]
+    assert content[0] == {"type": "image_url", "image_url": {"url": "https://public.example.com/a.png"}}
+    assert result.upstream_debug["actual_model_input_mode"] == "direct_vl_messages"
+    assert result.upstream_debug["image_part_included"] is True
+    assert result.upstream_debug["image_part_field_name"] == "messages[].content[].image_url.url"
+
+
+def test_direct_vl_payload_contains_text_prompt_and_image_url(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_direct_vl_env(monkeypatch)
+    monkeypatch.setattr(aliyun_service, "check_public_image_url", lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12})
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeJsonResponse({"choices": [{"message": {"content": json.dumps(_sample_json(), ensure_ascii=False)}}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    service.call_workflow("https://public.example.com/a.png", user_hint="保留蓝色主体", image_debug={"image_size_bytes": 12})
+
+    content = captured["payload"]["messages"][0]["content"]
+    assert content[0]["image_url"]["url"] == "https://public.example.com/a.png"
+    assert content[1] == {"type": "text", "text": "保留蓝色主体"}
+
+
+def test_text_only_model_input_returns_clear_error():
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    service.call_workflow = lambda image_url, user_hint=None, **kwargs: aliyun_service.StreamAggregationResult(  # type: ignore[name-defined]
+        json.dumps(_sample_json(), ensure_ascii=False),
+        [],
+        {"actual_model_input_mode": "text_only", "image_part_included": False},
+    )
+
+    with pytest.raises(WorkflowRequestError) as exc_info:
+        service.generate("https://public.example.com/a.png", image_debug={"image_size_bytes": 1})
+
+    assert "模型实际输入中没有图片 part" in str(exc_info.value)
+
+
+def test_direct_vl_output_json_still_passes_through_sanitizer(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_direct_vl_env(monkeypatch)
+    monkeypatch.setattr(aliyun_service, "check_public_image_url", lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12})
+    payload = _sample_json()
+    payload["elements"] = [{"id": "bad", "type": "bad_type"}, payload["elements"][0]]
+
+    def fake_urlopen(request, timeout):
+        return FakeJsonResponse({"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.generate("https://public.example.com/a.png", image_debug={"image_size_bytes": 12})
+
+    assert len(result.document["elements"]) == 1
+    assert result.dropped_elements[0]["index"] == 0
+    assert result.upstream_debug["actual_model_input_mode"] == "direct_vl_messages"

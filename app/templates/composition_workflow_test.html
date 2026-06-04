@@ -146,6 +146,11 @@ function setWorkflowDebug(body){
   if(!body){ node.textContent = 'debug 信息待命'; return; }
   const upstream = body.upstream_debug || {};
   const debug = {
+    actual_model_input_mode: upstream.actual_model_input_mode ?? null,
+    image_part_included: upstream.image_part_included ?? false,
+    image_part_field_name: upstream.image_part_field_name ?? null,
+    model_input_preview: upstream.model_input_preview ?? upstream.sanitized_request_payload ?? null,
+    model_input_warning: upstream.model_input_warning ?? null,
     attempt_count: upstream.attempt_count ?? null,
     attempt_mode: upstream.attempt_mode ?? null,
     prompt_length: upstream.prompt_length ?? null,
@@ -181,6 +186,10 @@ function workflowErrorSummary(body){
   if(statusCode) parts.push(`HTTP ${statusCode}`);
   if(debug.request_id) parts.push(`request_id=${debug.request_id}`);
   if(debug.error_message) parts.push(debug.error_message);
+  if(debug.actual_model_input_mode) parts.push(`actual_model_input_mode=${debug.actual_model_input_mode}`);
+  if(debug.image_part_included !== undefined) parts.push(`image_part_included=${debug.image_part_included}`);
+  if(debug.image_part_field_name) parts.push(`image_part_field_name=${debug.image_part_field_name}`);
+  if(debug.model_input_warning) parts.push(debug.model_input_warning);
   if(debug.prompt_length !== undefined) parts.push(`prompt_length=${debug.prompt_length}`);
   if(debug.biz_params_keys) parts.push(`biz_params_keys=${(debug.biz_params_keys || []).join(',')}`);
   if(debug.image_url_check_mode !== undefined) parts.push(`image_url_check_mode=${debug.image_url_check_mode}`);
