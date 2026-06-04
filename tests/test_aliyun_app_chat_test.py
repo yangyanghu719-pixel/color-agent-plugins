@@ -48,7 +48,28 @@ def test_aliyun_app_chat_test_page_has_controls():
     assert 'name="prompt"' in resp.text
     assert 'type="file"' in resp.text
     assert 'name="image"' in resp.text
-    assert "发送" in resp.text
+    assert "生成 JSON" in resp.text
+    assert 'id="jsonOutput"' in resp.text
+    assert "textarea_json" in resp.text
+
+
+def test_aliyun_app_chat_test_page_hides_debug_response_fields():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    hidden_labels = [
+        "public_image_url",
+        "upstream_status",
+        "sse_event_count",
+        "text_mode",
+        "raw_text_preview",
+        "parsed_json",
+        "recent_data_previews",
+        "request_debug",
+        "upstream_debug",
+    ]
+    for label in hidden_labels:
+        assert label not in resp.text
 
 
 def test_aliyun_app_chat_test_send_missing_image_returns_clear_error():
