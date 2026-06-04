@@ -113,6 +113,7 @@
 </div>
 
 <script src="/static/js/composition_param_renderer.js"></script>
+<script src="/static/js/composition_workflow_normalizer.js"></script>
 <script>
 const svgNs = 'http://www.w3.org/2000/svg';
 const $ = (id) => document.getElementById(id);
@@ -438,7 +439,7 @@ function duplicateSelected(){ const e=getSelected(); if(!e||!documentState) retu
 function shiftZ(step){ const e=getSelected(); if(!e) return; e.z_index=num(e.z_index)+step; syncAndRender(); }
 function defaultObject(type){ const z=Math.max(0,...(documentState.elements||[]).map(e=>num(e.z_index)))+1; const base={id:genId(type), type, role:'middle', opacity:1, z_index:z}; if(type==='circle') return {...base, x:0.45,y:0.45,radius:0.08,fill:'#60a5fa'}; if(type==='rectangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.16,rotation:0,fill:'#f59e0b'}; if(type==='triangle') return {...base, x:0.4,y:0.4,width:0.2,height:0.18,triangle_kind:'isosceles',rotation:0,fill:'#34d399'}; if(type==='line') return {...base, x1:0.35,y1:0.35,x2:0.65,y2:0.55,stroke:'#111827',stroke_width:0.004,style:'solid'}; return {...base, x:0.5,y:0.5,radius:0.03,fill:'#ef4444'}; }
 function addObject(){ if(!documentState) return; const t=$('add-type').value; const obj=defaultObject(t); documentState.elements.push(obj); selectedId=obj.id; syncAndRender(); }
-async function validatePayload(payload){ const resp=await fetch('/composition/validate-param-json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return resp.json(); }
+async function validatePayload(payload){ return (await window.normalizeCompositionInput(payload)).validation; }
 function formatValidationErrors(val){
   const details = val.errors || val;
   return `${val.message || 'JSON 不合法'}\n${JSON.stringify(details, null, 2)}`;
