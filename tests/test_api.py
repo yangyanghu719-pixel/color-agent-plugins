@@ -426,14 +426,14 @@ def test_workflow_generate_rejects_unsupported_file_type(tmp_path):
     assert "文件类型不支持" in body["message"]
 
 
-def test_workflow_generate_parses_output_text_result1(tmp_path, monkeypatch):
+def test_workflow_generate_parses_application_output_text(tmp_path, monkeypatch):
     from app.main import workflow_param_generation_service
 
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://public.example.com")
     monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "test-key")
     monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "test-app")
     monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
-    payload = {"result1": _sample_json()}
+    payload = _sample_json()
     monkeypatch.setattr(
         workflow_param_generation_service,
         "call_workflow",
