@@ -10,6 +10,8 @@ from typing import Any
 import requests
 
 DASHSCOPE_APP_BASE_URL = "https://dashscope.aliyuncs.com/api/v1/apps"
+DASHSCOPE_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+VISION_ANALYSIS_MODEL = "qwen3.6-plus"
 TEXT_MODE = "snapshot_latest_text"
 PREVIEW_CHARS = 1200
 RECENT_PREVIEW_COUNT = 20
@@ -85,6 +87,30 @@ class AliyunAppResult:
             "parsed_events": self.parsed_events,
             "text_fragments": self.text_fragments,
             "full_raw_preview": self.full_raw_preview,
+        }
+
+
+@dataclass
+class AliyunVisionAnalysisResult:
+    ok: bool
+    message: str
+    analysis: str
+    image_a_url: str
+    image_b_url: str
+    upstream_status: int | None
+    request_debug: dict[str, Any]
+    upstream_debug: dict[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "message": self.message,
+            "analysis": self.analysis,
+            "image_a_url": self.image_a_url,
+            "image_b_url": self.image_b_url,
+            "upstream_status": self.upstream_status,
+            "request_debug": self.request_debug,
+            "upstream_debug": self.upstream_debug,
         }
 
 
@@ -334,6 +360,100 @@ class AliyunAppClient:
             text_fragments=text_fragments or [],
             full_raw_preview="\n".join(raw_lines or [])[:10000],
         )
+
+
+    def build_vision_analysis_prompt(self) -> str:
+        return (
+            "你是一位面向图像构成课学生的专业指导老师。请比较接下来两张图：第一张为图A，第二张为图B。"
+            "重点从构图而不是题材内容本身出发分析差异，并用适合课堂反馈的中文输出。"
+            "请包含：\n"
+            "1. 整体构图差异：画面重心、主体位置、正负形、疏密与留白；\n"
+            "2. 视觉动线与节奏：线条/形状/色块如何引导视线，节奏是否稳定或有变化；\n"
+            "3. 层次与平衡：前后关系、大小比例、对称/不对称、稳定感或张力；\n"
+            "4. A/B 各自的优势与可能问题；\n"
+            "5. 给学生的可操作修改建议：至少 3 条，并说明如果想表达更稳定、更有张力或更聚焦，应该优先调整什么。"
+            "请避免泛泛而谈，尽量指向画面中的具体位置和构图关系。"
+        )
+
+    def build_vision_analysis_payload(self, image_a_url: str, image_b_url: str) -> dict[str, Any]:
+        return {
+            "model": VISION_ANALYSIS_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_a_url}},
+                        {"type": "image_url", "image_url": {"url": image_b_url}},
+                        {"type": "text", "text": self.build_vision_analysis_prompt()},
+                    ],
+                }
+            ],
+            "enable_thinking": False,
+        }
+
+    def analyze_composition_ab(self, image_a_url: str, image_b_url: str) -> AliyunVisionAnalysisResult:
+        api_key = self._env("ALIYUN_API_KEY")
+        endpoint_url = f"{DASHSCOPE_COMPATIBLE_BASE_URL}/chat/completions"
+        payload = self.build_vision_analysis_payload(image_a_url, image_b_url)
+        request_debug = {
+            "request_url": endpoint_url,
+            "model": VISION_ANALYSIS_MODEL,
+            "aliyun_api_key_present": bool(api_key),
+            "image_a_url": image_a_url,
+            "image_b_url": image_b_url,
+            "request_body_preview": payload,
+        }
+        upstream_debug = default_upstream_debug()
+        if not api_key:
+            upstream_debug["error_message"] = "缺少环境变量: ALIYUN_API_KEY"
+            return AliyunVisionAnalysisResult(False, upstream_debug["error_message"], "", image_a_url, image_b_url, None, request_debug, upstream_debug)
+
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        started = time.monotonic()
+        try:
+            response = requests.post(endpoint_url, headers=headers, json=payload, timeout=300)
+            upstream_debug["total_elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            upstream_debug["request_id"] = response.headers.get("X-Request-Id") or response.headers.get("x-request-id")
+            upstream_status = response.status_code
+            try:
+                data = response.json()
+            except ValueError:
+                upstream_debug["error_message"] = response.text[:PREVIEW_CHARS]
+                return AliyunVisionAnalysisResult(False, "阿里云视觉模型返回了无法解析的响应", "", image_a_url, image_b_url, upstream_status, request_debug, upstream_debug)
+            if not 200 <= upstream_status < 300:
+                upstream_debug["error_message"] = str(data.get("message") or data.get("error") or "阿里云视觉模型返回非 2xx 状态")
+                return AliyunVisionAnalysisResult(False, upstream_debug["error_message"], "", image_a_url, image_b_url, upstream_status, request_debug, upstream_debug)
+            analysis = self._extract_chat_completion_content(data)
+            if not analysis:
+                upstream_debug["error_message"] = "阿里云视觉模型响应中没有可显示的文本内容"
+                return AliyunVisionAnalysisResult(False, upstream_debug["error_message"], "", image_a_url, image_b_url, upstream_status, request_debug, upstream_debug)
+            return AliyunVisionAnalysisResult(True, "分析完成", analysis, image_a_url, image_b_url, upstream_status, request_debug, upstream_debug)
+        except requests.RequestException as exc:
+            upstream_debug["total_elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            upstream_debug["error_message"] = str(exc)
+            return AliyunVisionAnalysisResult(False, "调用阿里云视觉模型失败", "", image_a_url, image_b_url, None, request_debug, upstream_debug)
+
+    def _extract_chat_completion_content(self, data: dict[str, Any]) -> str:
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if not isinstance(message, dict):
+            return ""
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "".join(parts).strip()
+        return ""
 
     def _capture_debug_fields(self, event: dict[str, Any], upstream_debug: dict[str, Any]) -> None:
         request_id = event.get("request_id") or event.get("requestId")

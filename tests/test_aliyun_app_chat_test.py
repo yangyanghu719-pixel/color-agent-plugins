@@ -174,3 +174,63 @@ def test_aliyun_app_chat_test_page_does_not_expose_secret_headers():
     assert "API key" not in resp.text
     assert "api_key" not in resp.text
     assert "Authorization" not in resp.text
+
+
+def test_aliyun_app_chat_test_page_has_ab_comparison_controls():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    assert "将此图保存为图 A" in resp.text
+    assert "将此图保存为图 B" in resp.text
+    assert "分析 A/B 构图差异" in resp.text
+    assert 'id="thumbA"' in resp.text
+    assert 'id="thumbB"' in resp.text
+    assert "/aliyun-app-chat-test/save-composition-image" in resp.text
+    assert "/aliyun-app-chat-test/analyze-ab" in resp.text
+
+
+def test_aliyun_app_chat_test_save_composition_image_returns_public_url():
+    data_url = "data:image/png;base64," + __import__("base64").b64encode(_png_bytes()).decode("ascii")
+
+    resp = client.post("/aliyun-app-chat-test/save-composition-image", json={"slot": "A", "data_url": data_url})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["slot"] == "A"
+    assert body["public_image_url"].startswith("https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-a-")
+    assert body["static_path"].startswith("/static/uploads/workflow_inputs/composition-ab-a-")
+    assert client.get(body["static_path"]).content == _png_bytes()
+
+
+def test_aliyun_app_chat_test_analyze_ab_calls_dashscope_compatible_api(monkeypatch):
+    monkeypatch.setenv("ALIYUN_API_KEY", "test-key")
+    captured = {}
+
+    class FakeVisionResponse:
+        status_code = 200
+        headers = {"X-Request-Id": "req-vision"}
+
+        def json(self):
+            return {"choices": [{"message": {"content": "A/B 构图分析结果"}}]}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return FakeVisionResponse()
+
+    monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
+    image_a = "https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png"
+    image_b = "https://composition-lab.onrender.com/static/uploads/workflow_inputs/b.png"
+
+    resp = client.post("/aliyun-app-chat-test/analyze-ab", json={"image_a_url": image_a, "image_b_url": image_b})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["analysis"] == "A/B 构图分析结果"
+    assert captured["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["json"]["model"] == "qwen3.6-plus"
+    assert captured["json"]["messages"][0]["content"][0] == {"type": "image_url", "image_url": {"url": image_a}}
+    assert captured["json"]["messages"][0]["content"][1] == {"type": "image_url", "image_url": {"url": image_b}}
+    assert "图像构成课" in captured["json"]["messages"][0]["content"][2]["text"]

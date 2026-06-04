@@ -145,15 +145,15 @@
     button:hover:not(:disabled) { transform: translateY(-1px); }
     button:disabled { cursor: wait; opacity: 0.72; }
 
-    #sendBtn, #applyJsonBtn, #addObjectBtn {
+    #sendBtn, #applyJsonBtn, #addObjectBtn, #analyzeAbBtn {
       background: var(--primary);
       color: white;
       box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
     }
 
-    #sendBtn:hover:not(:disabled), #applyJsonBtn:hover:not(:disabled), #addObjectBtn:hover:not(:disabled) { background: var(--primary-dark); }
+    #sendBtn:hover:not(:disabled), #applyJsonBtn:hover:not(:disabled), #addObjectBtn:hover:not(:disabled), #analyzeAbBtn:hover:not(:disabled) { background: var(--primary-dark); }
 
-    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn {
+    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn, #saveAbtn, #saveBbtn {
       background: var(--soft);
       color: #1e3a8a;
     }
@@ -207,6 +207,52 @@
     .form-row label { margin: 0; font-size: 0.82rem; color: #475569; }
     .hint { color: var(--muted); font-size: 0.84rem; margin: 8px 0 0; }
 
+
+    .ab-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+    .ab-slot {
+      min-height: 140px;
+      border: 1px dashed #bfdbfe;
+      border-radius: 18px;
+      background: #f8fbff;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .ab-slot-title { font-weight: 800; color: #1e3a8a; }
+    .ab-thumb {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 14px;
+      object-fit: contain;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+    }
+    .ab-empty {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+    .ab-url {
+      color: var(--muted);
+      font-size: 0.72rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #abAnalysisOutput {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      background: #fff;
+      min-height: 120px;
+      color: #1f2937;
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+    }
+
     @media (max-width: 1180px) {
       main { grid-template-columns: 1fr 1fr; }
       .side-panel { grid-column: 1 / -1; }
@@ -246,6 +292,32 @@
             <h2>上传图片属性</h2>
           </div>
           <div id="imageMeta" class="meta">未选择图片。</div>
+        </section>
+
+        <section class="card" aria-labelledby="abCompareTitle">
+          <div class="panel-head">
+            <h2 id="abCompareTitle">A/B 构图比较</h2>
+          </div>
+          <p class="hint">调整画布后可把当前图元画面保存为图 A 或图 B，再让视觉模型比较两次构图尝试的差异。</p>
+          <div class="actions">
+            <button id="saveAbtn" type="button">将此图保存为图 A</button>
+            <button id="saveBbtn" type="button">将此图保存为图 B</button>
+          </div>
+          <div class="ab-slots">
+            <div class="ab-slot">
+              <div class="ab-slot-title">图 A</div>
+              <img id="thumbA" class="ab-thumb ab-empty" alt="图 A 缩略图" />
+              <div id="urlA" class="ab-url">尚未保存</div>
+            </div>
+            <div class="ab-slot">
+              <div class="ab-slot-title">图 B</div>
+              <img id="thumbB" class="ab-thumb ab-empty" alt="图 B 缩略图" />
+              <div id="urlB" class="ab-url">尚未保存</div>
+            </div>
+          </div>
+          <button id="analyzeAbBtn" type="button">分析 A/B 构图差异</button>
+          <div class="status" id="abStatus" aria-live="polite">等待保存图 A 和图 B。</div>
+          <div id="abAnalysisOutput">分析结果会显示在这里。</div>
         </section>
       </div>
 
@@ -335,12 +407,16 @@
     const status = $('status');
     const jsonOutput = $('jsonOutput');
     const imageMeta = $('imageMeta');
+    const abStatus = $('abStatus');
+    const abAnalysisOutput = $('abAnalysisOutput');
 
     let documentState = null;
     let selectedId = null;
     let dragState = null;
     let transformState = null;
     let requestInFlight = false;
+    let abSlots = { A: null, B: null };
+    let abRequestInFlight = false;
 
     const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
     const num = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v) : d;
@@ -867,6 +943,114 @@
       }
     }
 
+
+
+    function setAbBusy(isBusy, label = '处理中…') {
+      abRequestInFlight = isBusy;
+      ['saveAbtn', 'saveBbtn', 'analyzeAbBtn'].forEach((id) => { $(id).disabled = isBusy; });
+      $('analyzeAbBtn').textContent = isBusy ? label : '分析 A/B 构图差异';
+    }
+
+    function renderAbSlot(slot, data) {
+      const img = $(slot === 'A' ? 'thumbA' : 'thumbB');
+      const url = $(slot === 'A' ? 'urlA' : 'urlB');
+      if (!data?.static_path) {
+        img.removeAttribute('src');
+        img.classList.add('ab-empty');
+        url.textContent = '尚未保存';
+        return;
+      }
+      img.src = data.static_path;
+      img.classList.remove('ab-empty');
+      url.textContent = data['public_' + 'image_url'];
+      url.title = data['public_' + 'image_url'];
+    }
+
+    async function currentCanvasDataUrl() {
+      if (!documentState) throw new Error('请先生成或应用 JSON，并在画布中形成构图。');
+      renderAll();
+      const svg = $('canvas');
+      const clone = svg.cloneNode(true);
+      clone.setAttribute('xmlns', svgNs);
+      const clonedOverlay = clone.querySelector('#selectionOverlay');
+      if (clonedOverlay) clonedOverlay.innerHTML = '';
+      clone.style.background = svg.style.background || '#FFFFFF';
+      const width = num(documentState.canvas?.width, 1000);
+      const height = num(documentState.canvas?.height, 1000);
+      const svgText = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const img = new Image();
+        img.decoding = 'async';
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error('画布截图生成失败'));
+          img.src = objectUrl;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = documentState.canvas?.background || '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        return canvas.toDataURL('image/png');
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    async function saveCurrentAs(slot) {
+      if (abRequestInFlight) return;
+      setAbBusy(true, '保存中…');
+      abStatus.textContent = `正在保存图 ${slot}…`;
+      try {
+        const dataUrl = await currentCanvasDataUrl();
+        const response = await fetch('/aliyun-app-chat-test/save-composition-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot, data_url: dataUrl }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(getErrorText(data, '保存失败'));
+        abSlots[slot] = data;
+        renderAbSlot(slot, data);
+        abStatus.textContent = `图 ${slot} 已保存，可以继续调整画布再保存另一张。`;
+      } catch (err) {
+        abStatus.textContent = err.message || String(err);
+      } finally {
+        setAbBusy(false);
+      }
+    }
+
+    async function analyzeAb() {
+      if (abRequestInFlight) return;
+      if (!abSlots.A?.['public_' + 'image_url'] || !abSlots.B?.['public_' + 'image_url']) {
+        abStatus.textContent = '请先分别保存图 A 和图 B。';
+        return;
+      }
+      setAbBusy(true, '分析中…');
+      abStatus.textContent = '正在调用阿里云视觉模型分析 A/B 构图差异…';
+      abAnalysisOutput.textContent = '分析中，请稍候…';
+      try {
+        const response = await fetch('/aliyun-app-chat-test/analyze-ab', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_a_url: abSlots.A['public_' + 'image_url'], image_b_url: abSlots.B['public_' + 'image_url'] }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(getErrorText(data, '分析失败'));
+        abAnalysisOutput.textContent = data.analysis || '模型没有返回分析内容。';
+        abStatus.textContent = 'A/B 构图差异分析完成。';
+      } catch (err) {
+        abAnalysisOutput.textContent = '';
+        abStatus.textContent = err.message || String(err);
+      } finally {
+        setAbBusy(false);
+      }
+    }
+
     function clearCanvas() {
       documentState = null;
       selectedId = null;
@@ -925,6 +1109,10 @@
       clearCanvas();
       setBusy(false);
     });
+
+    $('saveAbtn').addEventListener('click', () => saveCurrentAs('A'));
+    $('saveBbtn').addEventListener('click', () => saveCurrentAs('B'));
+    $('analyzeAbBtn').addEventListener('click', analyzeAb);
 
     copyBtn.addEventListener('click', async () => {
       if (!jsonOutput.value) return;
