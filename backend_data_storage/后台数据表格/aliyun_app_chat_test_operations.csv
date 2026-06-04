@@ -1,0 +1,2 @@
+﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
+task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:54:04+00:00,,,,,,,,,,page_open,打开阿里云 App Chat 测试页
