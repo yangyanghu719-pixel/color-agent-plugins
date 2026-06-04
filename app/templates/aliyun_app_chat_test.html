@@ -623,7 +623,7 @@
     let requestInFlight = false;
     let abSlots = { A: null, B: null };
     let colorAbSlots = { A: null, B: null };
-    let abRequestInFlight = false;
+    let abRequestInFlight = { composition: false, color: false };
     let currentTaskId = `task-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
     function updateOperationLogStatus(message) {
@@ -657,8 +657,8 @@
       composition: {
         slots: abSlots,
         buttonIds: ['saveAbtn', 'saveBbtn', 'analyzeAbBtn'],
+        saveButtonIds: { A: 'saveAbtn', B: 'saveBbtn' },
         analyzeButtonId: 'analyzeAbBtn',
-        idleAnalyzeLabel: '分析 A/B 构图差异',
         statusEl: abStatus,
         outputEl: abAnalysisOutput,
         thumbIds: { A: 'thumbA', B: 'thumbB' },
@@ -672,8 +672,8 @@
       color: {
         slots: colorAbSlots,
         buttonIds: ['saveColorAbtn', 'saveColorBbtn', 'analyzeColorAbBtn'],
+        saveButtonIds: { A: 'saveColorAbtn', B: 'saveColorBbtn' },
         analyzeButtonId: 'analyzeColorAbBtn',
-        idleAnalyzeLabel: '分析 A/B 色彩差异',
         statusEl: colorAbStatus,
         outputEl: colorAbAnalysisOutput,
         thumbIds: { A: 'colorThumbA', B: 'colorThumbB' },
@@ -1472,11 +1472,21 @@
 
 
 
-    function setAbBusy(isBusy, label = '处理中…') {
-      abRequestInFlight = isBusy;
-      Object.values(comparisonConfigs).forEach((config) => {
-        config.buttonIds.forEach((id) => { $(id).disabled = isBusy; });
-        $(config.analyzeButtonId).textContent = isBusy ? label : config.idleAnalyzeLabel;
+    function setAbBusy(kind, isBusy, activeButtonId, label = '处理中…') {
+      const config = comparisonConfigs[kind];
+      if (!config) return;
+      abRequestInFlight[kind] = isBusy;
+      config.buttonIds.forEach((id) => {
+        const button = $(id);
+        if (!button) return;
+        if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent;
+        const isActiveButton = id === activeButtonId;
+        button.disabled = isBusy && isActiveButton;
+        if (isBusy && isActiveButton) {
+          button.textContent = label;
+          return;
+        }
+        button.textContent = button.dataset.idleLabel;
       });
     }
 
@@ -1552,8 +1562,8 @@
 
     async function saveCurrentAs(kind, slot) {
       const config = comparisonConfigs[kind];
-      if (abRequestInFlight) return;
-      setAbBusy(true, '保存中…');
+      if (abRequestInFlight[kind]) return;
+      setAbBusy(kind, true, config.saveButtonIds[slot], '保存中…');
       config.statusEl.textContent = `正在保存${config.saveNoun}图 ${slot}…`;
       try {
         const dataUrl = await currentCanvasDataUrl();
@@ -1571,18 +1581,18 @@
       } catch (err) {
         config.statusEl.textContent = err.message || String(err);
       } finally {
-        setAbBusy(false);
+        setAbBusy(kind, false);
       }
     }
 
     async function analyzeAb(kind = 'composition') {
       const config = comparisonConfigs[kind];
-      if (abRequestInFlight) return;
+      if (abRequestInFlight[kind]) return;
       if (!config.slots.A?.['public_' + 'image_url'] || !config.slots.B?.['public_' + 'image_url']) {
         config.statusEl.textContent = config.missingMessage;
         return;
       }
-      setAbBusy(true, '分析中…');
+      setAbBusy(kind, true, config.analyzeButtonId, '分析中…');
       config.statusEl.textContent = config.analyzingMessage;
       config.outputEl.textContent = '分析中，请稍候…';
       try {
@@ -1600,7 +1610,7 @@
         config.outputEl.textContent = '';
         config.statusEl.textContent = err.message || String(err);
       } finally {
-        setAbBusy(false);
+        setAbBusy(kind, false);
       }
     }
 
