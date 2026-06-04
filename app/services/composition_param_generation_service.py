@@ -181,10 +181,6 @@ class QwenParamClient:
         return content.strip()
 
 
-qwen_client = QwenParamClient()
-
-
-
 CSS_COLOR_NAMES = {
     "black": "#000000",
     "white": "#FFFFFF",
@@ -736,7 +732,7 @@ class GenerationResult:
 
 class CompositionParamGenerationService:
     def __init__(self, generate_text: Callable[[str | Path, str | None], str] | None = None) -> None:
-        self.generate_text = generate_text or qwen_client.generate
+        self.generate_text = generate_text or QwenParamClient().generate
 
     def generate(self, image_path: str | Path, user_hint: str | None = None) -> GenerationResult:
         source_image = read_source_image_info(image_path)
