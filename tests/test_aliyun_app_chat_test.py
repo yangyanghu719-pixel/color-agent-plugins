@@ -1,0 +1,139 @@
+import io
+import json
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+
+
+class FakeRequestsResponse:
+    def __init__(self, lines, status_code=200):
+        self._lines = lines
+        self.status_code = status_code
+        self.headers = {"X-Request-Id": "req-test"}
+
+    def iter_lines(self, decode_unicode=False):
+        for line in self._lines:
+            if decode_unicode:
+                yield line
+            else:
+                yield line.encode("utf-8")
+
+
+def _png_bytes() -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+        b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+        b"\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04\x00\x01"
+        b"\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+
+def _post_image(filename="test.png"):
+    return {"image": (filename, io.BytesIO(_png_bytes()), "image/png")}
+
+
+def _mock_env(monkeypatch):
+    monkeypatch.setenv("ALIYUN_API_KEY", "test-key")
+    monkeypatch.setenv("ALIYUN_APPLICATION_ID", "app-test")
+
+
+def test_aliyun_app_chat_test_page_has_controls():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    assert 'id="prompt"' in resp.text
+    assert 'name="prompt"' in resp.text
+    assert 'type="file"' in resp.text
+    assert 'name="image"' in resp.text
+    assert "发送" in resp.text
+
+
+def test_aliyun_app_chat_test_send_missing_image_returns_clear_error():
+    resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"})
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert "上传图片" in body["message"]
+    assert body["public_image_url"] == ""
+    assert "upstream_debug" in body
+
+
+def test_aliyun_app_chat_test_send_rejects_invalid_extension():
+    resp = client.post(
+        "/aliyun-app-chat-test/send",
+        data={"prompt": "go"},
+        files={"image": ("bad.gif", io.BytesIO(b"gif"), "image/gif")},
+    )
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert "文件类型不支持" in body["message"]
+
+
+def test_aliyun_app_chat_test_send_parses_single_sse_chunk(monkeypatch):
+    _mock_env(monkeypatch)
+    captured = {}
+
+    def fake_post(url, headers, json, stream, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "stream": stream, "timeout": timeout})
+        return FakeRequestsResponse(['data: {"output":{"text":"hello"}}'])
+
+    monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
+    resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["final_text"] == "hello"
+    assert body["raw_sse_data_lines"]
+    assert body["parsed_events"]
+    assert body["upstream_status"] == 200
+    assert captured["stream"] is True
+    assert captured["timeout"] == 300
+    assert captured["headers"]["X-DashScope-SSE"] == "enable"
+    assert captured["json"]["input"]["image_list"] == [body["public_image_url"]]
+
+
+def test_aliyun_app_chat_test_send_concatenates_multiple_sse_chunks(monkeypatch):
+    _mock_env(monkeypatch)
+
+    def fake_post(*args, **kwargs):
+        return FakeRequestsResponse([
+            'data: {"output":{"text":"a"}}',
+            'data: {"output":{"text":"b"}}',
+        ])
+
+    monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
+    resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
+
+    assert resp.status_code == 200
+    assert resp.json()["final_text"] == "ab"
+
+
+def test_aliyun_app_chat_test_public_image_url_prefix(monkeypatch):
+    _mock_env(monkeypatch)
+
+    def fake_post(*args, **kwargs):
+        return FakeRequestsResponse(['data: {"output":{"text":"ok"}}'])
+
+    monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
+    resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
+
+    assert resp.status_code == 200
+    assert resp.json()["public_image_url"].startswith(
+        "https://composition-lab.onrender.com/static/uploads/aliyun_app_inputs/"
+    )
+
+
+def test_aliyun_app_chat_test_page_does_not_expose_secret_headers():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    assert "API key" not in resp.text
+    assert "api_key" not in resp.text
+    assert "Authorization" not in resp.text

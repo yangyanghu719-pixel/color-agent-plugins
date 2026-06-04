@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
@@ -19,6 +20,7 @@ from app.services.composition_param_generation_service import (
     QwenRequestError,
     sanitize_composition_document,
 )
+from app.services.aliyun_app_chat_test_service import default_upstream_debug, AliyunAppChatTestService
 from app.services.aliyun_workflow_param_generation_service import (
     AliyunWorkflowParamGenerationService,
     WorkflowConfigurationError,
@@ -43,8 +45,10 @@ startup_log("after creating FastAPI app")
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 WORKFLOW_INPUT_DIR = UPLOAD_DIR / "workflow_inputs"
+ALIYUN_APP_INPUT_DIR = UPLOAD_DIR / "aliyun_app_inputs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+ALIYUN_APP_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -77,6 +81,7 @@ class LazyServiceProxy:
 extract_service = LazyServiceProxy(ElementExtractService, "ElementExtractService")
 param_generation_service = LazyServiceProxy(CompositionParamGenerationService, "CompositionParamGenerationService")
 workflow_param_generation_service = LazyServiceProxy(AliyunWorkflowParamGenerationService, "AliyunWorkflowParamGenerationService")
+aliyun_app_chat_test_service = LazyServiceProxy(AliyunAppChatTestService, "AliyunAppChatTestService")
 
 
 def get_extract_service() -> ElementExtractService:
@@ -89,6 +94,10 @@ def get_param_generation_service() -> CompositionParamGenerationService:
 
 def get_workflow_param_generation_service() -> AliyunWorkflowParamGenerationService:
     return workflow_param_generation_service._get()
+
+
+def get_aliyun_app_chat_test_service() -> AliyunAppChatTestService:
+    return aliyun_app_chat_test_service._get()
 
 
 def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | None = None) -> dict[str, Any]:
@@ -202,6 +211,34 @@ def workflow_error_response(
         },
     )
 
+
+def aliyun_app_chat_test_error_response(
+    status_code: int,
+    message: str,
+    *,
+    public_image_url: str = "",
+    request_debug: dict[str, Any] | None = None,
+    upstream_status: int | None = None,
+    full_raw_preview: str = "",
+    upstream_debug: dict[str, Any] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "ok": False,
+            "message": message,
+            "public_image_url": public_image_url,
+            "request_debug": request_debug or {},
+            "upstream_status": upstream_status,
+            "final_text": "",
+            "raw_sse_data_lines": [],
+            "parsed_events": [],
+            "text_fragments": [],
+            "full_raw_preview": full_raw_preview,
+            "upstream_debug": upstream_debug or default_upstream_debug(message),
+        },
+    )
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict:
     return {"status": "ok", "message": "service is running"}
@@ -238,6 +275,41 @@ def composition_workflow_test() -> HTMLResponse:
     html = Path("app/templates/composition_workflow_test.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
+
+
+@app.get("/aliyun-app-chat-test", response_class=HTMLResponse)
+def aliyun_app_chat_test() -> HTMLResponse:
+    html = Path("app/templates/aliyun_app_chat_test.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
+@app.post("/aliyun-app-chat-test/send")
+async def aliyun_app_chat_test_send(
+    image: UploadFile | None = File(default=None),
+    prompt: str | None = Form(default="go"),
+):
+    if image is None or not image.filename:
+        return aliyun_app_chat_test_error_response(400, "请上传图片（png/jpg/jpeg/webp）")
+    ext = Path(image.filename).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        return aliyun_app_chat_test_error_response(400, "文件类型不支持，仅支持 png/jpg/jpeg/webp")
+    content = await image.read()
+    if not content:
+        return aliyun_app_chat_test_error_response(400, "上传文件为空")
+    save_name = f"aliyun-app-input-{uuid4().hex}{ext}"
+    save_path = ALIYUN_APP_INPUT_DIR / save_name
+    public_image_url = f"https://composition-lab.onrender.com/static/uploads/aliyun_app_inputs/{save_name}"
+    try:
+        save_path.write_bytes(content)
+    except OSError as exc:
+        return aliyun_app_chat_test_error_response(500, "图片保存失败", public_image_url=public_image_url, upstream_debug=default_upstream_debug(str(exc)))
+    result = await run_in_threadpool(get_aliyun_app_chat_test_service().call, public_image_url, prompt)
+    body = result.as_dict()
+    status_code = 200 if result.ok else 502
+    error_message = result.upstream_debug.get("error_message")
+    if result.upstream_status is None and isinstance(error_message, str) and error_message.startswith("缺少环境变量"):
+        status_code = 503
+    return JSONResponse(status_code=status_code, content=body)
 
 @app.post("/composition/validate-param-json")
 def validate_param_json(payload: dict) -> dict:
