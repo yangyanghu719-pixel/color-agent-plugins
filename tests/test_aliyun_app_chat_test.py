@@ -50,6 +50,9 @@ def test_aliyun_app_chat_test_page_has_controls():
     assert 'name="image"' in resp.text
     assert "生成 JSON" in resp.text
     assert 'id="jsonOutput"' in resp.text
+    assert 'id="canvas"' in resp.text
+    assert 'id="propertyPanel"' in resp.text
+    assert "应用当前文本 JSON" in resp.text
     assert "textarea_json" in resp.text
 
 
