@@ -578,8 +578,15 @@ def test_application_payload_can_disable_image_list_or_biz_params(monkeypatch):
 
 
 def test_application_error_message_does_not_mention_qwen_vl(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
     service = AliyunWorkflowParamGenerationService()
     _set_app_env(monkeypatch)
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12},
+    )
     body = json.dumps({"request_id": "req-401", "message": "Incorrect API key"}).encode()
 
     def raise_http_error(*args, **kwargs):
