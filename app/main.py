@@ -267,6 +267,28 @@ def github_put_file(repo_path: str, content: bytes, commit_message: str) -> dict
 
 
 
+
+def github_operation_sync_status() -> dict[str, Any]:
+    config = github_operation_config()
+    public_config = {
+        "repo": config["repo"],
+        "branch": config["branch"],
+        "source_branch": config.get("source_branch") or "",
+        "base_dir": config["base_dir"],
+        "token_configured": bool(config["token"]),
+    }
+    if not config["token"]:
+        return {**public_config, "ok": False, "branch_exists": None, "message": "Render 未配置 GITHUB_OPERATION_TOKEN"}
+    try:
+        response = requests.get(github_ref_url(config["repo"], config["branch"]), headers=github_api_headers(config["token"]), timeout=20)
+    except requests.RequestException as exc:
+        return {**public_config, "ok": False, "branch_exists": None, "message": str(exc)}
+    if response.status_code == 200:
+        return {**public_config, "ok": True, "branch_exists": True, "message": "GitHub 数据分支已存在"}
+    if response.status_code == 404:
+        return {**public_config, "ok": False, "branch_exists": False, "message": "GitHub 数据分支尚不存在；下一次写入会尝试自动创建"}
+    return {**public_config, "ok": False, "branch_exists": None, "status_code": response.status_code, "message": response.text[:500]}
+
 def sync_operation_table_to_github(commit_message: str) -> dict[str, Any]:
     config = github_operation_config()
     if not config["token"] or not OPERATION_CSV_PATH.exists():
@@ -751,6 +773,11 @@ def aliyun_app_chat_test_operation_log(payload: dict[str, Any]):
         str(payload.get("event_label") or ""),
     )
     return {"ok": True, "task_id": task_key}
+
+
+@app.get("/aliyun-app-chat-test/operation-sync-status")
+def aliyun_app_chat_test_operation_sync_status():
+    return github_operation_sync_status()
 
 
 @app.get("/aliyun-app-chat-test/operation-log.csv")

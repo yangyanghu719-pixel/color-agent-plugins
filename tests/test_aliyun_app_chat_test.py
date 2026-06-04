@@ -415,3 +415,27 @@ def test_github_put_file_creates_missing_data_branch(monkeypatch):
     assert result["branch_result"]["created"] is True
     assert calls["post"]["json"] == {"ref": "refs/heads/composition-lab-data", "sha": "source-sha"}
     assert calls["put"]["json"]["branch"] == "composition-lab-data"
+
+
+def test_github_operation_sync_status_does_not_expose_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_OPERATION_TOKEN", "token-test")
+    monkeypatch.setenv("GITHUB_OPERATION_REPO", "owner/repo")
+    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab-data")
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+    def fake_get(url, headers, timeout):
+        assert headers["Authorization"] == "Bearer token-test"
+        assert "composition-lab-data" in url
+        return FakeResponse()
+
+    monkeypatch.setattr(main.requests, "get", fake_get)
+
+    status = main.github_operation_sync_status()
+
+    assert status["ok"] is True
+    assert status["branch_exists"] is True
+    assert status["token_configured"] is True
+    assert "token-test" not in json.dumps(status, ensure_ascii=False)
