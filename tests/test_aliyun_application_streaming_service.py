@@ -9,6 +9,7 @@ from app.services.aliyun_workflow_param_generation_service import (
     AliyunWorkflowParamGenerationService,
     WorkflowParseError,
     WorkflowRequestError,
+    _vision_call_mode,
     aggregate_application_stream,
     extract_workflow_document,
     parse_json_from_text,
@@ -147,6 +148,10 @@ def _set_app_env(monkeypatch):
     monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "key")
     monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "app-1234567890")
     monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
+
+
+def _set_application_mode(monkeypatch):
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "application")
 
 
 def test_application_payload_contains_prompt_and_biz_params(monkeypatch):
@@ -295,6 +300,7 @@ def test_fallback_disabled_makes_single_upstream_attempt(monkeypatch):
 
     service = AliyunWorkflowParamGenerationService()
     _set_app_env(monkeypatch)
+    _set_application_mode(monkeypatch)
     monkeypatch.delenv("ALIYUN_APPLICATION_ENABLE_FALLBACK", raising=False)
     monkeypatch.setattr(
         aliyun_service,
@@ -354,11 +360,21 @@ def test_public_image_url_generation_is_absolute():
 
 
 def _set_direct_vl_env(monkeypatch):
-    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "direct_vl")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "key")
     monkeypatch.setenv("ALIYUN_DASHSCOPE_BASE_URL", "https://dashscope.example.com/compatible-mode/v1")
     monkeypatch.setenv("ALIYUN_VISION_MODEL", "qwen-vl-plus")
 
+
+def test_default_vision_call_mode_is_direct_vl(monkeypatch):
+    monkeypatch.delenv("ALIYUN_VISION_CALL_MODE", raising=False)
+
+    assert _vision_call_mode() == "direct_vl"
+
+
+def test_application_mode_only_used_when_explicitly_configured(monkeypatch):
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "application")
+
+    assert _vision_call_mode() == "application"
 
 def test_direct_vl_payload_contains_image_url_part(monkeypatch):
     import app.services.aliyun_workflow_param_generation_service as aliyun_service
@@ -385,6 +401,8 @@ def test_direct_vl_payload_contains_image_url_part(monkeypatch):
     assert result.upstream_debug["actual_model_input_mode"] == "direct_vl_messages"
     assert result.upstream_debug["image_part_included"] is True
     assert result.upstream_debug["image_part_field_name"] == "messages[].content[].image_url.url"
+    assert result.upstream_debug["public_image_url"] == "https://public.example.com/a.png"
+    assert result.upstream_debug["model_input_preview"]["messages"][0]["content"][0]["image_url"]["url"] == "https://public.example.com/a.png"
 
 
 def test_direct_vl_payload_contains_text_prompt_and_image_url(monkeypatch):
