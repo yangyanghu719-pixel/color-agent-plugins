@@ -155,15 +155,15 @@
     button:hover:not(:disabled) { transform: translateY(-1px); }
     button:disabled { cursor: wait; opacity: 0.72; }
 
-    #sendBtn, #applyJsonBtn, #addObjectBtn, #analyzeAbBtn {
+    #sendBtn, #applyJsonBtn, #addObjectBtn, #analyzeAbBtn, #analyzeColorAbBtn {
       background: var(--primary);
       color: white;
       box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
     }
 
-    #sendBtn:hover:not(:disabled), #applyJsonBtn:hover:not(:disabled), #addObjectBtn:hover:not(:disabled), #analyzeAbBtn:hover:not(:disabled) { background: var(--primary-dark); }
+    #sendBtn:hover:not(:disabled), #applyJsonBtn:hover:not(:disabled), #addObjectBtn:hover:not(:disabled), #analyzeAbBtn:hover:not(:disabled), #analyzeColorAbBtn:hover:not(:disabled) { background: var(--primary-dark); }
 
-    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn, #saveAbtn, #saveBbtn {
+    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn, #saveAbtn, #saveBbtn, #saveColorAbtn, #saveColorBbtn {
       background: var(--soft);
       color: #1e3a8a;
     }
@@ -322,7 +322,14 @@
     .hint { color: var(--muted); font-size: 0.84rem; margin: 8px 0 0; }
 
 
-    .ab-panel { grid-column: 1 / -1; }
+    .comparison-panels {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: clamp(14px, 2vw, 24px);
+      align-items: start;
+    }
+    .ab-panel { min-width: 0; }
     .ab-slots {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -364,7 +371,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    #abAnalysisOutput {
+    .ab-analysis-output {
       margin-top: 12px;
       padding: 12px 14px;
       border: 1px solid #e5e7eb;
@@ -375,22 +382,22 @@
       overflow-wrap: anywhere;
       font-size: 0.9rem;
     }
-    #abAnalysisOutput h1, #abAnalysisOutput h2, #abAnalysisOutput h3 { margin: 0.65em 0 0.35em; }
-    #abAnalysisOutput h1 { font-size: 1.25rem; }
-    #abAnalysisOutput h2 { font-size: 1.12rem; }
-    #abAnalysisOutput h3 { font-size: 1rem; }
-    #abAnalysisOutput p { margin: 0.5em 0; }
-    #abAnalysisOutput ul, #abAnalysisOutput ol { margin: 0.45em 0 0.65em 1.35em; padding: 0; }
-    #abAnalysisOutput li { margin: 0.25em 0; }
-    #abAnalysisOutput strong { font-weight: 800; }
-    #abAnalysisOutput code {
+    .ab-analysis-output h1, .ab-analysis-output h2, .ab-analysis-output h3 { margin: 0.65em 0 0.35em; }
+    .ab-analysis-output h1 { font-size: 1.25rem; }
+    .ab-analysis-output h2 { font-size: 1.12rem; }
+    .ab-analysis-output h3 { font-size: 1rem; }
+    .ab-analysis-output p { margin: 0.5em 0; }
+    .ab-analysis-output ul, .ab-analysis-output ol { margin: 0.45em 0 0.65em 1.35em; padding: 0; }
+    .ab-analysis-output li { margin: 0.25em 0; }
+    .ab-analysis-output strong { font-weight: 800; }
+    .ab-analysis-output code {
       padding: 0.1em 0.35em;
       border-radius: 6px;
       background: #f1f5f9;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 0.92em;
     }
-    #abAnalysisOutput pre {
+    .ab-analysis-output pre {
       overflow: auto;
       padding: 10px 12px;
       border-radius: 12px;
@@ -416,6 +423,7 @@
       #jsonOutput { min-height: 48vh; max-height: none; }
       .result { flex: none; }
       .canvas-wrap { min-height: 0; }
+      .comparison-panels { grid-template-columns: 1fr; }
       .ab-slots { grid-template-columns: 1fr; }
       .ab-thumb { height: clamp(140px, 48vw, 220px); }
     }
@@ -524,31 +532,59 @@
         </div>
       </aside>
 
-      <section class="card ab-panel" aria-labelledby="abCompareTitle">
-        <div class="panel-head">
-          <h2 id="abCompareTitle">A/B 构图比较</h2>
-        </div>
-        <p class="hint">调整画布后可把当前图元画面保存为图 A 或图 B，再让视觉模型比较两次构图尝试的差异。</p>
-        <div class="actions">
-          <button id="saveAbtn" type="button">将此图保存为图 A</button>
-          <button id="saveBbtn" type="button">将此图保存为图 B</button>
-        </div>
-        <div class="ab-slots">
-          <div class="ab-slot">
-            <div class="ab-slot-title">图 A</div>
-            <img id="thumbA" class="ab-thumb ab-empty" alt="图 A 缩略图" />
-            <div id="urlA" class="ab-url">尚未保存</div>
+      <div class="comparison-panels">
+        <section class="card ab-panel" aria-labelledby="abCompareTitle">
+          <div class="panel-head">
+            <h2 id="abCompareTitle">A/B 构图比较</h2>
           </div>
-          <div class="ab-slot">
-            <div class="ab-slot-title">图 B</div>
-            <img id="thumbB" class="ab-thumb ab-empty" alt="图 B 缩略图" />
-            <div id="urlB" class="ab-url">尚未保存</div>
+          <p class="hint">调整画布后可把当前图元画面保存为图 A 或图 B，再让视觉模型比较两次构图尝试的差异。</p>
+          <div class="actions">
+            <button id="saveAbtn" type="button">将构图保存为图 A</button>
+            <button id="saveBbtn" type="button">将构图保存为图 B</button>
           </div>
-        </div>
-        <button id="analyzeAbBtn" type="button">分析 A/B 构图差异</button>
-        <div class="status" id="abStatus" aria-live="polite">等待保存图 A 和图 B。</div>
-        <div id="abAnalysisOutput">分析结果会显示在这里。</div>
-      </section>
+          <div class="ab-slots">
+            <div class="ab-slot">
+              <div class="ab-slot-title">构图 A</div>
+              <img id="thumbA" class="ab-thumb ab-empty" alt="构图 A 缩略图" />
+              <div id="urlA" class="ab-url">尚未保存</div>
+            </div>
+            <div class="ab-slot">
+              <div class="ab-slot-title">构图 B</div>
+              <img id="thumbB" class="ab-thumb ab-empty" alt="构图 B 缩略图" />
+              <div id="urlB" class="ab-url">尚未保存</div>
+            </div>
+          </div>
+          <button id="analyzeAbBtn" type="button">分析 A/B 构图差异</button>
+          <div class="status" id="abStatus" aria-live="polite">等待保存构图 A 和构图 B。</div>
+          <div id="abAnalysisOutput" class="ab-analysis-output">构图分析结果会显示在这里。</div>
+        </section>
+
+        <section class="card ab-panel" aria-labelledby="abColorCompareTitle">
+          <div class="panel-head">
+            <h2 id="abColorCompareTitle">A/B 色彩比较</h2>
+          </div>
+          <p class="hint">调整画布色彩后可把当前图元画面保存为色彩图 A 或色彩图 B，再让视觉模型比较两次配色尝试的色彩关系。</p>
+          <div class="actions">
+            <button id="saveColorAbtn" type="button">将色彩保存为图 A</button>
+            <button id="saveColorBbtn" type="button">将色彩保存为图 B</button>
+          </div>
+          <div class="ab-slots">
+            <div class="ab-slot">
+              <div class="ab-slot-title">色彩 A</div>
+              <img id="colorThumbA" class="ab-thumb ab-empty" alt="色彩 A 缩略图" />
+              <div id="colorUrlA" class="ab-url">尚未保存</div>
+            </div>
+            <div class="ab-slot">
+              <div class="ab-slot-title">色彩 B</div>
+              <img id="colorThumbB" class="ab-thumb ab-empty" alt="色彩 B 缩略图" />
+              <div id="colorUrlB" class="ab-url">尚未保存</div>
+            </div>
+          </div>
+          <button id="analyzeColorAbBtn" type="button">分析 A/B 色彩差异</button>
+          <div class="status" id="colorAbStatus" aria-live="polite">等待保存色彩图 A 和色彩图 B。</div>
+          <div id="colorAbAnalysisOutput" class="ab-analysis-output">色彩分析结果会显示在这里。</div>
+        </section>
+      </div>
     </main>
   </div>
 
@@ -567,6 +603,8 @@
     const imageMeta = $('imageMeta');
     const abStatus = $('abStatus');
     const abAnalysisOutput = $('abAnalysisOutput');
+    const colorAbStatus = $('colorAbStatus');
+    const colorAbAnalysisOutput = $('colorAbAnalysisOutput');
     const colorPanel = $('colorPanel');
 
     let documentState = null;
@@ -575,7 +613,41 @@
     let transformState = null;
     let requestInFlight = false;
     let abSlots = { A: null, B: null };
+    let colorAbSlots = { A: null, B: null };
     let abRequestInFlight = false;
+
+    const comparisonConfigs = {
+      composition: {
+        slots: abSlots,
+        buttonIds: ['saveAbtn', 'saveBbtn', 'analyzeAbBtn'],
+        analyzeButtonId: 'analyzeAbBtn',
+        idleAnalyzeLabel: '分析 A/B 构图差异',
+        statusEl: abStatus,
+        outputEl: abAnalysisOutput,
+        thumbIds: { A: 'thumbA', B: 'thumbB' },
+        urlIds: { A: 'urlA', B: 'urlB' },
+        saveNoun: '构图',
+        missingMessage: '请先分别保存构图 A 和构图 B。',
+        analyzingMessage: '正在调用阿里云视觉模型分析 A/B 构图差异…',
+        doneMessage: 'A/B 构图差异分析完成。',
+        endpoint: '/aliyun-app-chat-test/analyze-ab',
+      },
+      color: {
+        slots: colorAbSlots,
+        buttonIds: ['saveColorAbtn', 'saveColorBbtn', 'analyzeColorAbBtn'],
+        analyzeButtonId: 'analyzeColorAbBtn',
+        idleAnalyzeLabel: '分析 A/B 色彩差异',
+        statusEl: colorAbStatus,
+        outputEl: colorAbAnalysisOutput,
+        thumbIds: { A: 'colorThumbA', B: 'colorThumbB' },
+        urlIds: { A: 'colorUrlA', B: 'colorUrlB' },
+        saveNoun: '色彩',
+        missingMessage: '请先分别保存色彩图 A 和色彩图 B。',
+        analyzingMessage: '正在调用阿里云视觉模型分析 A/B 色彩差异…',
+        doneMessage: 'A/B 色彩差异分析完成。',
+        endpoint: '/aliyun-app-chat-test/analyze-ab-color',
+      },
+    };
 
     const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
     const clamp = (n, min, max) => Math.max(min, Math.min(max, Number(n) || 0));
@@ -1365,13 +1437,16 @@
 
     function setAbBusy(isBusy, label = '处理中…') {
       abRequestInFlight = isBusy;
-      ['saveAbtn', 'saveBbtn', 'analyzeAbBtn'].forEach((id) => { $(id).disabled = isBusy; });
-      $('analyzeAbBtn').textContent = isBusy ? label : '分析 A/B 构图差异';
+      Object.values(comparisonConfigs).forEach((config) => {
+        config.buttonIds.forEach((id) => { $(id).disabled = isBusy; });
+        $(config.analyzeButtonId).textContent = isBusy ? label : config.idleAnalyzeLabel;
+      });
     }
 
-    function renderAbSlot(slot, data) {
-      const img = $(slot === 'A' ? 'thumbA' : 'thumbB');
-      const url = $(slot === 'A' ? 'urlA' : 'urlB');
+    function renderAbSlot(kind, slot, data) {
+      const config = comparisonConfigs[kind];
+      const img = $(config.thumbIds[slot]);
+      const url = $(config.urlIds[slot]);
       if (!data?.static_path) {
         img.removeAttribute('src');
         img.classList.add('ab-empty');
@@ -1384,45 +1459,11 @@
       url.title = data['public_' + 'image_url'];
     }
 
-    async function currentCanvasDataUrl() {
-      if (!documentState) throw new Error('请先生成或应用 JSON，并在画布中形成构图。');
-      renderAll();
-      const svg = $('canvas');
-      const clone = svg.cloneNode(true);
-      clone.setAttribute('xmlns', svgNs);
-      const clonedOverlay = clone.querySelector('#selectionOverlay');
-      if (clonedOverlay) clonedOverlay.innerHTML = '';
-      clone.style.background = svg.style.background || '#FFFFFF';
-      const width = num(documentState.canvas?.width, 1000);
-      const height = num(documentState.canvas?.height, 1000);
-      const svgText = new XMLSerializer().serializeToString(clone);
-      const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const img = new Image();
-        img.decoding = 'async';
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error('画布截图生成失败'));
-          img.src = objectUrl;
-        });
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = documentState.canvas?.background || '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        return canvas.toDataURL('image/png');
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
-    }
-
-    async function saveCurrentAs(slot) {
+    async function saveCurrentAs(kind, slot) {
+      const config = comparisonConfigs[kind];
       if (abRequestInFlight) return;
       setAbBusy(true, '保存中…');
-      abStatus.textContent = `正在保存图 ${slot}…`;
+      config.statusEl.textContent = `正在保存${config.saveNoun}图 ${slot}…`;
       try {
         const dataUrl = await currentCanvasDataUrl();
         const response = await fetch('/aliyun-app-chat-test/save-composition-image', {
@@ -1432,38 +1473,39 @@
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(getErrorText(data, '保存失败'));
-        abSlots[slot] = data;
-        renderAbSlot(slot, data);
-        abStatus.textContent = `图 ${slot} 已保存，可以继续调整画布再保存另一张。`;
+        config.slots[slot] = data;
+        renderAbSlot(kind, slot, data);
+        config.statusEl.textContent = `${config.saveNoun}图 ${slot} 已保存，可以继续调整画布再保存另一张。`;
       } catch (err) {
-        abStatus.textContent = err.message || String(err);
+        config.statusEl.textContent = err.message || String(err);
       } finally {
         setAbBusy(false);
       }
     }
 
-    async function analyzeAb() {
+    async function analyzeAb(kind = 'composition') {
+      const config = comparisonConfigs[kind];
       if (abRequestInFlight) return;
-      if (!abSlots.A?.['public_' + 'image_url'] || !abSlots.B?.['public_' + 'image_url']) {
-        abStatus.textContent = '请先分别保存图 A 和图 B。';
+      if (!config.slots.A?.['public_' + 'image_url'] || !config.slots.B?.['public_' + 'image_url']) {
+        config.statusEl.textContent = config.missingMessage;
         return;
       }
       setAbBusy(true, '分析中…');
-      abStatus.textContent = '正在调用阿里云视觉模型分析 A/B 构图差异…';
-      abAnalysisOutput.textContent = '分析中，请稍候…';
+      config.statusEl.textContent = config.analyzingMessage;
+      config.outputEl.textContent = '分析中，请稍候…';
       try {
-        const response = await fetch('/aliyun-app-chat-test/analyze-ab', {
+        const response = await fetch(config.endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_a_url: abSlots.A['public_' + 'image_url'], image_b_url: abSlots.B['public_' + 'image_url'] }),
+          body: JSON.stringify({ image_a_url: config.slots.A['public_' + 'image_url'], image_b_url: config.slots.B['public_' + 'image_url'] }),
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(getErrorText(data, '分析失败'));
-        abAnalysisOutput.innerHTML = renderMarkdown(data.analysis);
-        abStatus.textContent = 'A/B 构图差异分析完成。';
+        config.outputEl.innerHTML = renderMarkdown(data.analysis);
+        config.statusEl.textContent = config.doneMessage;
       } catch (err) {
-        abAnalysisOutput.textContent = '';
-        abStatus.textContent = err.message || String(err);
+        config.outputEl.textContent = '';
+        config.statusEl.textContent = err.message || String(err);
       } finally {
         setAbBusy(false);
       }
@@ -1529,9 +1571,12 @@
       setBusy(false);
     });
 
-    $('saveAbtn').addEventListener('click', () => saveCurrentAs('A'));
-    $('saveBbtn').addEventListener('click', () => saveCurrentAs('B'));
-    $('analyzeAbBtn').addEventListener('click', analyzeAb);
+    $('saveAbtn').addEventListener('click', () => saveCurrentAs('composition', 'A'));
+    $('saveBbtn').addEventListener('click', () => saveCurrentAs('composition', 'B'));
+    $('analyzeAbBtn').addEventListener('click', () => analyzeAb('composition'));
+    $('saveColorAbtn').addEventListener('click', () => saveCurrentAs('color', 'A'));
+    $('saveColorBbtn').addEventListener('click', () => saveCurrentAs('color', 'B'));
+    $('analyzeColorAbBtn').addEventListener('click', () => analyzeAb('color'));
 
     copyBtn.addEventListener('click', async () => {
       if (!jsonOutput.value) return;

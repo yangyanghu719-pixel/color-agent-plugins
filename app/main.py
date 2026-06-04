@@ -406,6 +406,23 @@ async def aliyun_app_chat_test_analyze_ab(payload: dict[str, Any]):
     return JSONResponse(status_code=status_code, content=result.as_dict())
 
 
+
+
+@app.post("/aliyun-app-chat-test/analyze-ab-color")
+async def aliyun_app_chat_test_analyze_ab_color(payload: dict[str, Any]):
+    image_a_url = str(payload.get("image_a_url") or "").strip()
+    image_b_url = str(payload.get("image_b_url") or "").strip()
+    if not image_a_url or not image_b_url:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存色彩图 A 和色彩图 B"})
+    if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
+        return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_color_ab, image_a_url, image_b_url)
+    status_code = 200 if result.ok else 502
+    if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
+        status_code = 503
+    return JSONResponse(status_code=status_code, content=result.as_dict())
+
+
 @app.post("/composition/validate-param-json")
 def validate_param_json(payload: dict) -> dict:
     return sanitize_composition_document(payload)

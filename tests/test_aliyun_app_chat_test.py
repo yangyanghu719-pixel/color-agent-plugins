@@ -186,13 +186,20 @@ def test_aliyun_app_chat_test_page_has_ab_comparison_controls():
     resp = client.get("/aliyun-app-chat-test")
 
     assert resp.status_code == 200
-    assert "将此图保存为图 A" in resp.text
-    assert "将此图保存为图 B" in resp.text
+    assert "将构图保存为图 A" in resp.text
+    assert "将构图保存为图 B" in resp.text
     assert "分析 A/B 构图差异" in resp.text
+    assert "A/B 色彩比较" in resp.text
+    assert "将色彩保存为图 A" in resp.text
+    assert "将色彩保存为图 B" in resp.text
+    assert "分析 A/B 色彩差异" in resp.text
     assert 'id="thumbA"' in resp.text
     assert 'id="thumbB"' in resp.text
+    assert 'id="colorThumbA"' in resp.text
+    assert 'id="colorThumbB"' in resp.text
     assert "/aliyun-app-chat-test/save-composition-image" in resp.text
     assert "/aliyun-app-chat-test/analyze-ab" in resp.text
+    assert "/aliyun-app-chat-test/analyze-ab-color" in resp.text
 
 
 def test_aliyun_app_chat_test_save_composition_image_returns_public_url():
@@ -240,3 +247,40 @@ def test_aliyun_app_chat_test_analyze_ab_calls_dashscope_compatible_api(monkeypa
     assert captured["json"]["messages"][0]["content"][0] == {"type": "image_url", "image_url": {"url": image_a}}
     assert captured["json"]["messages"][0]["content"][1] == {"type": "image_url", "image_url": {"url": image_b}}
     assert "图像构成课" in captured["json"]["messages"][0]["content"][2]["text"]
+
+
+def test_aliyun_app_chat_test_analyze_ab_color_uses_color_teacher_prompt(monkeypatch):
+    monkeypatch.setenv("ALIYUN_API_KEY", "test-key")
+    captured = {}
+
+    class FakeVisionResponse:
+        status_code = 200
+        headers = {"X-Request-Id": "req-color"}
+
+        def json(self):
+            return {"choices": [{"message": {"content": "A/B 色彩分析结果"}}]}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return FakeVisionResponse()
+
+    monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
+    image_a = "https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png"
+    image_b = "https://composition-lab.onrender.com/static/uploads/workflow_inputs/b.png"
+
+    resp = client.post("/aliyun-app-chat-test/analyze-ab-color", json={"image_a_url": image_a, "image_b_url": image_b})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["analysis"] == "A/B 色彩分析结果"
+    assert captured["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["json"]["model"] == "qwen3.6-plus"
+    assert captured["json"]["messages"][0]["content"][0] == {"type": "image_url", "image_url": {"url": image_a}}
+    assert captured["json"]["messages"][0]["content"][1] == {"type": "image_url", "image_url": {"url": image_b}}
+    color_prompt = captured["json"]["messages"][0]["content"][2]["text"]
+    assert "图像色彩课程" in color_prompt
+    assert "色彩关系" in color_prompt
+    assert "构图而不是" not in color_prompt
+    assert body["request_debug"]["analysis_type"] == "color"

@@ -375,7 +375,21 @@ class AliyunAppClient:
             "请避免泛泛而谈，尽量指向画面中的具体位置和构图关系。"
         )
 
-    def build_vision_analysis_payload(self, image_a_url: str, image_b_url: str) -> dict[str, Any]:
+    def build_vision_color_analysis_prompt(self) -> str:
+        return (
+            "你是一位面向图像色彩课程学生的专业指导老师。请比较接下来两张图：第一张为图A，第二张为图B。"
+            "重点从色彩关系而不是题材内容本身出发分析差异，并用适合课堂反馈的中文 Markdown 输出。"
+            "请使用 Markdown 标题、列表和加粗重点，结构包含：\n"
+            "## 整体色彩印象：冷暖倾向、明度基调、饱和度强弱和情绪气质；\n"
+            "## 主色、辅助色与强调色：A/B 各自的色彩层级、面积比例和视觉焦点；\n"
+            "## 色彩对比与协调：明度对比、纯度对比、冷暖对比、互补/邻近关系是否有效；\n"
+            "## 空间与层次：色彩如何制造前后、重量、节奏和画面平衡；\n"
+            "## A/B 各自的优势与可能问题；\n"
+            "## 可操作修改建议：至少 3 条，说明若想更统一、更有冲击力或更突出主体，应该优先调整哪些颜色、面积或对比。"
+            "请避免泛泛而谈，尽量指向画面中的具体色块、位置和色彩关系。"
+        )
+
+    def build_vision_analysis_payload(self, image_a_url: str, image_b_url: str, prompt: str | None = None) -> dict[str, Any]:
         return {
             "model": VISION_ANALYSIS_MODEL,
             "messages": [
@@ -384,7 +398,7 @@ class AliyunAppClient:
                     "content": [
                         {"type": "image_url", "image_url": {"url": image_a_url}},
                         {"type": "image_url", "image_url": {"url": image_b_url}},
-                        {"type": "text", "text": self.build_vision_analysis_prompt()},
+                        {"type": "text", "text": prompt or self.build_vision_analysis_prompt()},
                     ],
                 }
             ],
@@ -392,9 +406,15 @@ class AliyunAppClient:
         }
 
     def analyze_composition_ab(self, image_a_url: str, image_b_url: str) -> AliyunVisionAnalysisResult:
+        return self._analyze_ab(image_a_url, image_b_url, self.build_vision_analysis_prompt(), "composition")
+
+    def analyze_color_ab(self, image_a_url: str, image_b_url: str) -> AliyunVisionAnalysisResult:
+        return self._analyze_ab(image_a_url, image_b_url, self.build_vision_color_analysis_prompt(), "color")
+
+    def _analyze_ab(self, image_a_url: str, image_b_url: str, prompt: str, analysis_type: str) -> AliyunVisionAnalysisResult:
         api_key = self._env("ALIYUN_API_KEY")
         endpoint_url = f"{DASHSCOPE_COMPATIBLE_BASE_URL}/chat/completions"
-        payload = self.build_vision_analysis_payload(image_a_url, image_b_url)
+        payload = self.build_vision_analysis_payload(image_a_url, image_b_url, prompt)
         request_debug = {
             "request_url": endpoint_url,
             "model": VISION_ANALYSIS_MODEL,
@@ -402,6 +422,7 @@ class AliyunAppClient:
             "image_a_url": image_a_url,
             "image_b_url": image_b_url,
             "request_body_preview": payload,
+            "analysis_type": analysis_type,
         }
         upstream_debug = default_upstream_debug()
         if not api_key:
