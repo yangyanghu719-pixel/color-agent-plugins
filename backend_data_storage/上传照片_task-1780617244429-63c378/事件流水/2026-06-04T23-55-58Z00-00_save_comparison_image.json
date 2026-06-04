@@ -1,0 +1,9 @@
+{
+  "created_at": "2026-06-04T23:55:58+00:00",
+  "task_id": "task-1780617244429-63c378",
+  "event_type": "save_comparison_image",
+  "event_label": "保存composition图 B",
+  "updates": {
+    "composition_image_b": "https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-b-89fd83de2c54408997118d36ee132f58.png"
+  }
+}
