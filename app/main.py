@@ -1,15 +1,22 @@
 from pathlib import Path
 import base64
 import binascii
+import csv
+from datetime import datetime, timezone
+import json
 import logging
 import mimetypes
+import os
 import re
+import threading
 import urllib.parse
 from uuid import uuid4
 from typing import Any
 
+import requests
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -48,12 +55,22 @@ startup_log("after creating FastAPI app")
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 WORKFLOW_INPUT_DIR = UPLOAD_DIR / "workflow_inputs"
+OPERATION_DATA_DIR = Path("static/operation_data")
+OPERATION_CSV_PATH = OPERATION_DATA_DIR / "aliyun_app_chat_test_operations.csv"
+OPERATION_JSONL_PATH = OPERATION_DATA_DIR / "aliyun_app_chat_test_events.jsonl"
+OPERATION_ARTIFACT_ROOT = OPERATION_DATA_DIR / "github_ready"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+OPERATION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+OPERATION_ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
 startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AB_COMPOSITION_IMAGE_BYTES = 7 * 1024 * 1024
 DATA_URL_PATTERN = re.compile(r"^data:(image/(?:png|jpeg|jpg|webp));base64,(.+)$", re.IGNORECASE | re.DOTALL)
+GITHUB_CONTENTS_API = "https://api.github.com/repos/{repo}/contents/{path}"
+DEFAULT_OPERATION_GITHUB_REPO = "yangyanghu719-pixel/color-agent-plugins"
+DEFAULT_OPERATION_GITHUB_BRANCH = "composition-lab-data"
+DEFAULT_OPERATION_GITHUB_BASE_DIR = "backend_data_storage"
 
 
 class LazyServiceProxy:
@@ -101,6 +118,198 @@ def get_workflow_param_generation_service() -> AliyunWorkflowParamGenerationServ
 
 def get_aliyun_app_chat_test_service() -> AliyunAppChatTestService:
     return aliyun_app_chat_test_service._get()
+
+
+OPERATION_TABLE_COLUMNS = [
+    "task_id",
+    "created_at",
+    "updated_at",
+    "prompt",
+    "manual_uploaded_image",
+    "ai_raw_image",
+    "composition_image_a",
+    "composition_image_b",
+    "composition_analysis_result",
+    "color_image_a",
+    "color_image_b",
+    "color_analysis_result",
+    "last_event_type",
+    "last_event_label",
+]
+OPERATION_LOG_LOCK = threading.Lock()
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def safe_task_id(value: Any | None = None) -> str:
+    raw = str(value or "").strip()
+    if raw and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", raw):
+        return raw
+    return uuid4().hex[:12]
+
+
+def truncate_cell(value: Any, max_chars: int = 4000) -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return text[:max_chars]
+
+
+
+def github_operation_config() -> dict[str, str]:
+    return {
+        "token": os.getenv("GITHUB_OPERATION_TOKEN", "").strip(),
+        "repo": os.getenv("GITHUB_OPERATION_REPO", DEFAULT_OPERATION_GITHUB_REPO).strip(),
+        "branch": os.getenv("GITHUB_OPERATION_BRANCH", DEFAULT_OPERATION_GITHUB_BRANCH).strip(),
+        "base_dir": os.getenv("GITHUB_OPERATION_BASE_DIR", DEFAULT_OPERATION_GITHUB_BASE_DIR).strip().strip("/"),
+    }
+
+
+def safe_github_path_part(value: str) -> str:
+    cleaned = re.sub(r"[^0-9A-Za-z_\-\u4e00-\u9fff]+", "_", value).strip("_")
+    return cleaned or "未命名"
+
+
+def timestamp_file_prefix(value: str | None = None) -> str:
+    text = (value or utc_now_iso()).replace(":", "-").replace("+", "Z")
+    return re.sub(r"[^0-9A-Za-z_.\-]+", "-", text)
+
+
+def task_artifact_folder(task_id: str) -> str:
+    return f"上传照片_{safe_github_path_part(task_id)}"
+
+
+def github_contents_url(repo: str, repo_path: str) -> str:
+    return GITHUB_CONTENTS_API.format(repo=repo, path=urllib.parse.quote(repo_path, safe="/"))
+
+
+def github_put_file(repo_path: str, content: bytes, commit_message: str) -> dict[str, Any]:
+    config = github_operation_config()
+    if not config["token"]:
+        return {"enabled": False, "message": "未配置 GITHUB_OPERATION_TOKEN，已仅保存到服务器本地临时目录"}
+    url = github_contents_url(config["repo"], repo_path)
+    headers = {
+        "Authorization": f"Bearer {config['token']}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    params = {"ref": config["branch"]}
+    payload: dict[str, Any] = {
+        "message": commit_message,
+        "content": base64.b64encode(content).decode("ascii"),
+        "branch": config["branch"],
+    }
+    try:
+        existing = requests.get(url, headers=headers, params=params, timeout=20)
+        if existing.status_code == 200:
+            sha = existing.json().get("sha")
+            if sha:
+                payload["sha"] = sha
+        elif existing.status_code not in {404, 422}:
+            return {"enabled": True, "ok": False, "status_code": existing.status_code, "message": existing.text[:500]}
+        response = requests.put(url, headers=headers, json=payload, timeout=30)
+        return {"enabled": True, "ok": 200 <= response.status_code < 300, "status_code": response.status_code, "repo_path": repo_path, "message": response.text[:500]}
+    except requests.RequestException as exc:
+        return {"enabled": True, "ok": False, "repo_path": repo_path, "message": str(exc)}
+
+
+
+
+def sync_operation_table_to_github(commit_message: str) -> dict[str, Any]:
+    config = github_operation_config()
+    if not config["token"] or not OPERATION_CSV_PATH.exists():
+        return {"enabled": bool(config["token"]), "ok": False, "message": "CSV 不存在或未配置 GitHub Token"}
+    repo_path = f"{config['base_dir']}/后台数据表格/aliyun_app_chat_test_operations.csv".strip("/")
+    return github_put_file(repo_path, OPERATION_CSV_PATH.read_bytes(), commit_message)
+
+def should_delete_local_after_github_sync(github_result: dict[str, Any]) -> bool:
+    if not github_result.get("enabled") or not github_result.get("ok"):
+        return False
+    value = os.getenv("GITHUB_OPERATION_DELETE_LOCAL_AFTER_SYNC", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+def write_operation_artifact(task_id: Any | None, relative_path: str, content: bytes | str, commit_message: str) -> dict[str, Any]:
+    task_key = safe_task_id(task_id)
+    content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    local_path = OPERATION_ARTIFACT_ROOT / task_artifact_folder(task_key) / relative_path
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_bytes(content_bytes)
+    config = github_operation_config()
+    repo_path = f"{config['base_dir']}/{task_artifact_folder(task_key)}/{Path(relative_path).as_posix()}".strip("/")
+    github_result = github_put_file(repo_path, content_bytes, commit_message)
+    if should_delete_local_after_github_sync(github_result):
+        local_path.unlink(missing_ok=True)
+    return {"task_id": task_key, "local_path": str(local_path), "repo_path": repo_path, "github": github_result}
+
+
+def write_operation_text_artifact(task_id: Any | None, relative_path: str, text: str, commit_message: str) -> dict[str, Any]:
+    return write_operation_artifact(task_id, relative_path, text, commit_message)
+
+
+def comparison_image_artifact_path(kind: str, slot: str, ext: str) -> str:
+    folder = "任务2_色彩比较" if kind == "color" else "任务1_构图比较"
+    label = "图片A" if slot.upper() == "A" else "图片B"
+    return f"{folder}/{label}{ext}"
+
+
+def comparison_analysis_artifact_path(kind: str) -> str:
+    if kind == "color":
+        return "任务2_色彩比较/色彩对比分析文本.txt"
+    return "任务1_构图比较/构图对比分析文本.txt"
+
+def read_operation_rows() -> dict[str, dict[str, str]]:
+    if not OPERATION_CSV_PATH.exists():
+        return {}
+    with OPERATION_CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file_obj:
+        return {row["task_id"]: {column: row.get(column, "") for column in OPERATION_TABLE_COLUMNS} for row in csv.DictReader(file_obj) if row.get("task_id")}
+
+
+def write_operation_rows(rows: dict[str, dict[str, str]]) -> None:
+    with OPERATION_CSV_PATH.open("w", encoding="utf-8-sig", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=OPERATION_TABLE_COLUMNS)
+        writer.writeheader()
+        writer.writerows(sorted(rows.values(), key=lambda row: row.get("created_at", "")))
+
+
+def record_aliyun_app_operation(task_id: Any | None, event_type: str, event_label: str = "", **updates: Any) -> str:
+    task_key = safe_task_id(task_id)
+    now = utc_now_iso()
+    with OPERATION_LOG_LOCK:
+        rows = read_operation_rows()
+        row = rows.get(task_key) or {column: "" for column in OPERATION_TABLE_COLUMNS}
+        row["task_id"] = task_key
+        row["created_at"] = row.get("created_at") or now
+        row["updated_at"] = now
+        row["last_event_type"] = truncate_cell(event_type, 200)
+        row["last_event_label"] = truncate_cell(event_label, 500)
+        for key, value in updates.items():
+            if key in OPERATION_TABLE_COLUMNS and value is not None:
+                row[key] = truncate_cell(value)
+        rows[task_key] = row
+        write_operation_rows(rows)
+        event_payload = {
+            "created_at": now,
+            "task_id": task_key,
+            "event_type": event_type,
+            "event_label": event_label,
+            "updates": {key: truncate_cell(value) for key, value in updates.items()},
+        }
+        with OPERATION_JSONL_PATH.open("a", encoding="utf-8") as file_obj:
+            file_obj.write(json.dumps(event_payload, ensure_ascii=False) + "\n")
+    event_json = json.dumps(event_payload, ensure_ascii=False, indent=2)
+    event_path = f"事件流水/{timestamp_file_prefix(now)}_{safe_github_path_part(event_type)}.json"
+    write_operation_text_artifact(task_key, event_path, event_json, f"Record {event_type} for {task_key}")
+    latest_row = {column: rows[task_key].get(column, "") for column in OPERATION_TABLE_COLUMNS}
+    write_operation_text_artifact(
+        task_key,
+        "当前任务汇总.json",
+        json.dumps(latest_row, ensure_ascii=False, indent=2),
+        f"Update operation summary for {task_key}",
+    )
+    sync_operation_table_to_github(f"Update Aliyun app operation CSV after {event_type} for {task_key}")
+    return task_key
 
 
 def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | None = None) -> dict[str, Any]:
@@ -314,6 +523,7 @@ def aliyun_app_chat_test() -> HTMLResponse:
 async def aliyun_app_chat_test_send(
     image: UploadFile | None = File(default=None),
     prompt: str | None = Form(default="go"),
+    task_id: str | None = Form(default=None),
 ):
     if image is None or not image.filename:
         return aliyun_app_chat_test_error_response(400, "请上传图片（png/jpg/jpeg/webp）")
@@ -323,6 +533,7 @@ async def aliyun_app_chat_test_send(
     content = await image.read()
     if not content:
         return aliyun_app_chat_test_error_response(400, "上传文件为空")
+    task_key = safe_task_id(task_id)
     save_name = f"aliyun-app-input-{uuid4().hex}{ext}"
     save_path = WORKFLOW_INPUT_DIR / save_name
     public_image_url = aliyun_app_chat_test_public_workflow_url(save_name)
@@ -340,6 +551,19 @@ async def aliyun_app_chat_test_send(
         },
         flush=True,
     )
+    record_aliyun_app_operation(
+        task_key,
+        "manual_upload",
+        "手动上传图片",
+        prompt=(prompt or "").strip() or "go",
+        manual_uploaded_image=public_image_url,
+    )
+    write_operation_artifact(
+        task_key,
+        f"手动上传的图片{ext}",
+        content,
+        f"Save manual upload for {task_key}",
+    )
     result = await run_in_threadpool(
         get_aliyun_app_chat_test_service().call,
         public_image_url,
@@ -348,6 +572,17 @@ async def aliyun_app_chat_test_send(
         local_saved_path=str(save_path),
     )
     body = result.as_dict()
+    body["task_id"] = task_key
+    if result.ok:
+        record_aliyun_app_operation(task_key, "ai_generation", "智能体分析得到原始图元", ai_raw_image=result.textarea_json)
+        write_operation_text_artifact(
+            task_key,
+            "分析后的原始图元/textarea_json.json",
+            result.textarea_json,
+            f"Save AI raw elements for {task_key}",
+        )
+    else:
+        record_aliyun_app_operation(task_key, "ai_generation_failed", result.message or result.error)
     status_code = 200 if result.ok else 502
     error_message = result.upstream_debug.get("error_message")
     if result.upstream_status is None and isinstance(error_message, str) and error_message.startswith("缺少环境变量"):
@@ -380,10 +615,25 @@ async def aliyun_app_chat_test_save_composition_image(payload: dict[str, Any]):
         save_path.write_bytes(content)
     except OSError:
         return JSONResponse(status_code=500, content={"ok": False, "message": "保存 A/B 图片失败"})
+    comparison_kind = str(payload.get("kind") or "composition")
+    image_column_prefix = "color_image_" if comparison_kind == "color" else "composition_image_"
+    task_key = record_aliyun_app_operation(
+        payload.get("task_id"),
+        "save_comparison_image",
+        f"保存{comparison_kind}图 {slot}",
+        **{image_column_prefix + slot.lower(): aliyun_app_chat_test_public_workflow_url(save_name)},
+    )
+    write_operation_artifact(
+        task_key,
+        comparison_image_artifact_path(comparison_kind, slot, ext),
+        content,
+        f"Save {comparison_kind} image {slot} for {task_key}",
+    )
     return {
         "ok": True,
         "message": f"图 {slot} 已保存",
         "slot": slot,
+        "task_id": task_key,
         "public_image_url": aliyun_app_chat_test_public_workflow_url(save_name),
         "static_path": f"/static/uploads/workflow_inputs/{save_name}",
         "mime_type": mime_type,
@@ -399,13 +649,22 @@ async def aliyun_app_chat_test_analyze_ab(payload: dict[str, Any]):
         return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存图 A 和图 B"})
     if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
         return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    task_key = safe_task_id(payload.get("task_id"))
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_composition_ab, image_a_url, image_b_url)
+    analysis_text = result.analysis if result.ok else result.message
+    record_aliyun_app_operation(task_key, "composition_analysis", "构图分析结果", composition_analysis_result=analysis_text)
+    write_operation_text_artifact(
+        task_key,
+        comparison_analysis_artifact_path("composition"),
+        analysis_text,
+        f"Save composition analysis for {task_key}",
+    )
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
-    return JSONResponse(status_code=status_code, content=result.as_dict())
-
-
+    body = result.as_dict()
+    body["task_id"] = task_key
+    return JSONResponse(status_code=status_code, content=body)
 
 
 @app.post("/aliyun-app-chat-test/analyze-ab-color")
@@ -416,11 +675,43 @@ async def aliyun_app_chat_test_analyze_ab_color(payload: dict[str, Any]):
         return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存色彩图 A 和色彩图 B"})
     if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
         return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    task_key = safe_task_id(payload.get("task_id"))
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_color_ab, image_a_url, image_b_url)
+    analysis_text = result.analysis if result.ok else result.message
+    record_aliyun_app_operation(task_key, "color_analysis", "色彩分析结果", color_analysis_result=analysis_text)
+    write_operation_text_artifact(
+        task_key,
+        comparison_analysis_artifact_path("color"),
+        analysis_text,
+        f"Save color analysis for {task_key}",
+    )
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
-    return JSONResponse(status_code=status_code, content=result.as_dict())
+    body = result.as_dict()
+    body["task_id"] = task_key
+    return JSONResponse(status_code=status_code, content=body)
+
+
+@app.post("/aliyun-app-chat-test/operation-log")
+def aliyun_app_chat_test_operation_log(payload: dict[str, Any]):
+    task_key = record_aliyun_app_operation(
+        payload.get("task_id"),
+        str(payload.get("event_type") or "ui_operation"),
+        str(payload.get("event_label") or ""),
+    )
+    return {"ok": True, "task_id": task_key}
+
+
+@app.get("/aliyun-app-chat-test/operation-log.csv")
+def aliyun_app_chat_test_operation_log_csv():
+    if not OPERATION_CSV_PATH.exists():
+        write_operation_rows({})
+    return FileResponse(
+        OPERATION_CSV_PATH,
+        media_type="text/csv; charset=utf-8",
+        filename="aliyun_app_chat_test_operations.csv",
+    )
 
 
 @app.post("/composition/validate-param-json")
