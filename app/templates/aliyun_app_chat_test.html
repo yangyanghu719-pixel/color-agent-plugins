@@ -29,7 +29,7 @@
 <body>
   <header>
     <h1>阿里云 DashScope App 对话测试页</h1>
-    <p>独立 curl 复刻测试：上传图片、发送 prompt、原样查看后端返回的 SSE data chunk。</p>
+    <p>独立链路测试：上传图片 → 固定 Render 公网 URL → DashScope App completion → SSE snapshot_latest_text → JSON。</p>
   </header>
   <main>
     <form id="chatForm">
@@ -84,13 +84,19 @@
       const assistantBody = document.getElementById('assistantBody');
       assistantBody.innerHTML = `
         <p><span class="status">${escapeHtml(statusText)}</span></p>
-        <div class="grid"><div class="key">阿里云 HTTP status</div><pre>${escapeHtml(data.upstream_status)}</pre></div>
-        <div class="grid"><div class="key">final_text</div><pre>${escapeHtml(data.final_text || '')}</pre></div>
-        <div class="grid"><div class="key">raw_sse_data_lines</div><pre>${escapeHtml(pretty(data.raw_sse_data_lines))}</pre></div>
-        <div class="grid"><div class="key">parsed_events</div><pre>${escapeHtml(pretty(data.parsed_events))}</pre></div>
-        <div class="grid"><div class="key">full_raw_preview</div><pre>${escapeHtml(data.full_raw_preview || '')}</pre></div>
-        <div class="grid"><div class="key">upstream_debug</div><pre>${escapeHtml(pretty(data.upstream_debug))}</pre></div>
-        <div class="grid"><div class="key">request_debug</div><pre>${escapeHtml(pretty(data.request_debug))}</pre></div>`;
+        <div class="grid"><div class="key">ok</div><pre>${escapeHtml(data.ok)}</pre></div>
+        <div class="grid"><div class="key">public_image_url</div><pre>${escapeHtml(data.public_image_url || '')}</pre></div>
+        <div class="grid"><div class="key">upstream_status</div><pre>${escapeHtml(data.upstream_status)}</pre></div>
+        <div class="grid"><div class="key">sse_event_count</div><pre>${escapeHtml(data.sse_event_count ?? 0)}</pre></div>
+        <div class="grid"><div class="key">text_mode</div><pre>${escapeHtml(data.text_mode || '')}</pre></div>
+        <div class="grid"><div class="key">final_text_length</div><pre>${escapeHtml(data.final_text_length ?? 0)}</pre></div>
+        <div class="grid"><div class="key">raw_text_preview</div><pre>${escapeHtml(data.raw_text_preview || '')}</pre></div>
+        <div class="grid"><div class="key">textarea_json</div><textarea readonly>${escapeHtml(data.textarea_json || '')}</textarea></div>
+        <div class="grid"><div class="key">parsed_json</div><pre>${escapeHtml(pretty(data.parsed_json))}</pre></div>
+        <div class="grid"><div class="key">error</div><pre>${escapeHtml(data.error || '')}</pre></div>
+        <div class="grid"><div class="key">recent_data_previews</div><pre>${escapeHtml(pretty(data.recent_data_previews || []))}</pre></div>
+        <div class="grid"><div class="key">request_debug</div><pre>${escapeHtml(pretty(data.request_debug))}</pre></div>
+        <div class="grid"><div class="key">upstream_debug</div><pre>${escapeHtml(pretty(data.upstream_debug))}</pre></div>`;
     }
 
     form.addEventListener('submit', async (event) => {
@@ -109,7 +115,7 @@
         const data = await response.json();
         renderResponse(data, response.ok && data.ok ? '成功' : '失败');
       } catch (error) {
-        renderResponse({ upstream_status: null, final_text: '', raw_sse_data_lines: [], parsed_events: [], full_raw_preview: String(error), upstream_debug: { error_message: String(error) }, request_debug: {}, public_image_url: '' }, '失败');
+        renderResponse({ ok: false, error: String(error), public_image_url: '', upstream_status: null, sse_event_count: 0, raw_text_preview: String(error), textarea_json: '', parsed_json: null, recent_data_previews: [], final_text_length: 0, upstream_debug: { error_message: String(error) }, request_debug: {} }, '失败');
       }
     });
 

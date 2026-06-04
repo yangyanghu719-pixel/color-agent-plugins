@@ -81,7 +81,7 @@ def test_aliyun_app_chat_test_send_parses_single_sse_chunk(monkeypatch):
 
     def fake_post(url, headers, json, stream, timeout):
         captured.update({"url": url, "headers": headers, "json": json, "stream": stream, "timeout": timeout})
-        return FakeRequestsResponse(['data: {"output":{"text":"hello"}}'])
+        return FakeRequestsResponse(['event: result', '', 'data: {"output":{"text":"{\\"version\\":\\"1.0\\"}"}}', 'data: HTTP_STATUS/200'])
 
     monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
     resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
@@ -89,44 +89,57 @@ def test_aliyun_app_chat_test_send_parses_single_sse_chunk(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["final_text"] == "hello"
-    assert body["raw_sse_data_lines"]
-    assert body["parsed_events"]
+    assert body["final_text"] == '{"version":"1.0"}'
+    assert body["parsed_json"] == {"version": "1.0"}
+    assert body["textarea_json"] == json.dumps({"version": "1.0"}, ensure_ascii=False, indent=2)
+    assert body["sse_event_count"] == 1
+    assert body["text_mode"] == "snapshot_latest_text"
     assert body["upstream_status"] == 200
+    assert captured["url"] == "https://dashscope.aliyuncs.com/api/v1/apps/app-test/completion"
     assert captured["stream"] is True
     assert captured["timeout"] == 300
     assert captured["headers"]["X-DashScope-SSE"] == "enable"
-    assert captured["json"]["input"]["image_list"] == [body["public_image_url"]]
+    assert captured["headers"]["Content-Type"] == "application/json"
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["json"] == {"input": {"prompt": "go", "image_list": [body["public_image_url"]]}, "parameters": {}}
 
 
-def test_aliyun_app_chat_test_send_concatenates_multiple_sse_chunks(monkeypatch):
+def test_aliyun_app_chat_test_send_uses_latest_snapshot_not_append(monkeypatch):
     _mock_env(monkeypatch)
+    captured = {}
 
-    def fake_post(*args, **kwargs):
+    def fake_post(url, headers, json, stream, timeout):
+        captured["json"] = json
         return FakeRequestsResponse([
-            'data: {"output":{"text":"a"}}',
-            'data: {"output":{"text":"b"}}',
+            'data: {"output":{"text":"{"}}',
+            'data: {"output":{"text":"{\\"version\\""}}',
+            'data: {"output":{"text":"{\\"version\\":\\"1.0\\"}"}}',
         ])
 
     monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
     resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
 
     assert resp.status_code == 200
-    assert resp.json()["final_text"] == "ab"
+    body = resp.json()
+    assert body["final_text"] == '{"version":"1.0"}'
+    assert body["final_text"] != '{{"version"{"version":"1.0"}'
+    assert body["parsed_json"] == {"version": "1.0"}
+    assert body["text_mode"] == "snapshot_latest_text"
+    assert captured["json"] == {"input": {"prompt": "go", "image_list": [body["public_image_url"]]}, "parameters": {}}
 
 
 def test_aliyun_app_chat_test_public_image_url_prefix(monkeypatch):
     _mock_env(monkeypatch)
 
     def fake_post(*args, **kwargs):
-        return FakeRequestsResponse(['data: {"output":{"text":"ok"}}'])
+        return FakeRequestsResponse(['data: {"output":{"text":"{\\"version\\":\\"1.0\\"}"}}'])
 
     monkeypatch.setattr("app.services.aliyun_app_chat_test_service.requests.post", fake_post)
     resp = client.post("/aliyun-app-chat-test/send", data={"prompt": "go"}, files=_post_image())
 
     assert resp.status_code == 200
     assert resp.json()["public_image_url"].startswith(
-        "https://composition-lab.onrender.com/static/uploads/aliyun_app_inputs/"
+        "https://composition-lab.onrender.com/static/uploads/workflow_inputs/"
     )
 
 
