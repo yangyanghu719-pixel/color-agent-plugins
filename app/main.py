@@ -1,6 +1,9 @@
 from pathlib import Path
+import base64
+import binascii
 import logging
 import mimetypes
+import re
 import urllib.parse
 from uuid import uuid4
 from typing import Any
@@ -49,6 +52,8 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_AB_COMPOSITION_IMAGE_BYTES = 7 * 1024 * 1024
+DATA_URL_PATTERN = re.compile(r"^data:(image/(?:png|jpeg|jpg|webp));base64,(.+)$", re.IGNORECASE | re.DOTALL)
 
 
 class LazyServiceProxy:
@@ -135,6 +140,22 @@ async def build_workflow_image_debug(
     else:
         debug.update(await check_public_image_url_async(image_url))
     return debug
+
+
+
+def aliyun_app_chat_test_public_workflow_url(save_name: str) -> str:
+    return f"https://composition-lab.onrender.com/static/uploads/workflow_inputs/{save_name}"
+
+
+def is_allowed_ab_image_url(image_url: str) -> bool:
+    parsed = urllib.parse.urlparse(image_url)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == "composition-lab.onrender.com"
+        and parsed.path.startswith("/static/uploads/workflow_inputs/")
+        and Path(parsed.path).suffix.lower() in ALLOWED_UPLOAD_EXTENSIONS
+    )
+
 
 
 def generation_error_response(
@@ -304,7 +325,7 @@ async def aliyun_app_chat_test_send(
         return aliyun_app_chat_test_error_response(400, "上传文件为空")
     save_name = f"aliyun-app-input-{uuid4().hex}{ext}"
     save_path = WORKFLOW_INPUT_DIR / save_name
-    public_image_url = f"https://composition-lab.onrender.com/static/uploads/workflow_inputs/{save_name}"
+    public_image_url = aliyun_app_chat_test_public_workflow_url(save_name)
     try:
         save_path.write_bytes(content)
     except OSError as exc:
@@ -332,6 +353,58 @@ async def aliyun_app_chat_test_send(
     if result.upstream_status is None and isinstance(error_message, str) and error_message.startswith("缺少环境变量"):
         status_code = 503
     return JSONResponse(status_code=status_code, content=body)
+
+
+@app.post("/aliyun-app-chat-test/save-composition-image")
+async def aliyun_app_chat_test_save_composition_image(payload: dict[str, Any]):
+    slot = str(payload.get("slot") or "").upper()
+    if slot not in {"A", "B"}:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "slot 必须是 A 或 B"})
+    data_url = str(payload.get("data_url") or "")
+    match = DATA_URL_PATTERN.match(data_url)
+    if not match:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "请提交 png/jpeg/webp 的 data URL"})
+    mime_type = match.group(1).lower().replace("image/jpg", "image/jpeg")
+    try:
+        content = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError):
+        return JSONResponse(status_code=400, content={"ok": False, "message": "图片数据不是有效的 base64"})
+    if not content:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "图片数据为空"})
+    if len(content) > MAX_AB_COMPOSITION_IMAGE_BYTES:
+        return JSONResponse(status_code=413, content={"ok": False, "message": "图片超过 7MB，请缩小画布后再保存"})
+    ext = ".jpg" if mime_type == "image/jpeg" else f".{mime_type.rsplit('/', 1)[-1]}"
+    save_name = f"composition-ab-{slot.lower()}-{uuid4().hex}{ext}"
+    save_path = WORKFLOW_INPUT_DIR / save_name
+    try:
+        save_path.write_bytes(content)
+    except OSError:
+        return JSONResponse(status_code=500, content={"ok": False, "message": "保存 A/B 图片失败"})
+    return {
+        "ok": True,
+        "message": f"图 {slot} 已保存",
+        "slot": slot,
+        "public_image_url": aliyun_app_chat_test_public_workflow_url(save_name),
+        "static_path": f"/static/uploads/workflow_inputs/{save_name}",
+        "mime_type": mime_type,
+        "size_bytes": len(content),
+    }
+
+
+@app.post("/aliyun-app-chat-test/analyze-ab")
+async def aliyun_app_chat_test_analyze_ab(payload: dict[str, Any]):
+    image_a_url = str(payload.get("image_a_url") or "").strip()
+    image_b_url = str(payload.get("image_b_url") or "").strip()
+    if not image_a_url or not image_b_url:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存图 A 和图 B"})
+    if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
+        return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_composition_ab, image_a_url, image_b_url)
+    status_code = 200 if result.ok else 502
+    if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
+        status_code = 503
+    return JSONResponse(status_code=status_code, content=result.as_dict())
+
 
 @app.post("/composition/validate-param-json")
 def validate_param_json(payload: dict) -> dict:
@@ -403,7 +476,7 @@ async def composition_generate_param_json_by_workflow(
         save_path.write_bytes(content)
     except OSError as exc:
         return workflow_error_response(500, "图片保存失败", errors=[{"path": "image", "message": str(exc)}])
-    public_image_url = f"https://composition-lab.onrender.com/static/uploads/workflow_inputs/{save_name}"
+    public_image_url = aliyun_app_chat_test_public_workflow_url(save_name)
     prompt = (user_hint or "").strip() or "go"
     app_id_exists = bool(get_workflow_param_generation_service()._env("ALIYUN_APPLICATION_ID"))
     api_key_exists = bool(get_workflow_param_generation_service()._env("ALIYUN_API_KEY"))
