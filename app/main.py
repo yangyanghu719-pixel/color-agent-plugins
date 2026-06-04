@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 import mimetypes
 import urllib.parse
 from uuid import uuid4
@@ -27,17 +28,67 @@ from app.services.aliyun_workflow_param_generation_service import (
     check_public_image_url_async,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def startup_log(message: str) -> None:
+    print(f"[composition-lab startup] {message}", flush=True)
+    logger.info("[composition-lab startup] %s", message)
+
+
+startup_log("before creating FastAPI app")
 app = FastAPI(title="Composition Lab API", version="0.3.0")
+startup_log("after creating FastAPI app")
 
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 WORKFLOW_INPUT_DIR = UPLOAD_DIR / "workflow_inputs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
-extract_service = ElementExtractService()
-param_generation_service = CompositionParamGenerationService()
-workflow_param_generation_service = AliyunWorkflowParamGenerationService()
+startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+class LazyServiceProxy:
+    def __init__(self, factory, name: str) -> None:
+        object.__setattr__(self, "_factory", factory)
+        object.__setattr__(self, "_name", name)
+        object.__setattr__(self, "_instance", None)
+
+    def _get(self):
+        instance = object.__getattribute__(self, "_instance")
+        if instance is None:
+            name = object.__getattribute__(self, "_name")
+            startup_log(f"creating {name} lazily")
+            instance = object.__getattribute__(self, "_factory")()
+            object.__setattr__(self, "_instance", instance)
+        return instance
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._get(), name, value)
+
+
+extract_service = LazyServiceProxy(ElementExtractService, "ElementExtractService")
+param_generation_service = LazyServiceProxy(CompositionParamGenerationService, "CompositionParamGenerationService")
+workflow_param_generation_service = LazyServiceProxy(AliyunWorkflowParamGenerationService, "AliyunWorkflowParamGenerationService")
+
+
+def get_extract_service() -> ElementExtractService:
+    return extract_service._get()
+
+
+def get_param_generation_service() -> CompositionParamGenerationService:
+    return param_generation_service._get()
+
+
+def get_workflow_param_generation_service() -> AliyunWorkflowParamGenerationService:
+    return workflow_param_generation_service._get()
 
 
 def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | None = None) -> dict[str, Any]:
@@ -193,7 +244,7 @@ def validate_param_json(payload: dict) -> dict:
 
 @app.post("/composition/application-health-check")
 def composition_application_health_check() -> dict:
-    aggregation = workflow_param_generation_service.call_application("", "请只回复 OK", stream=False, image_debug={"health_check": True}, skip_image_check=True)
+    aggregation = get_workflow_param_generation_service().call_application("", "请只回复 OK", stream=False, image_debug={"health_check": True}, skip_image_check=True)
     return {
         "ok": "OK" in aggregation.raw_text.upper(),
         "raw_text": aggregation.raw_text,
@@ -224,7 +275,7 @@ async def composition_generate_param_json(
     except OSError as exc:
         return generation_error_response(500, "internal_error", "参考图保存失败", errors=[{"path": "image", "message": str(exc)}])
     try:
-        return param_generation_service.generate(save_path, user_hint).as_dict()
+        return get_param_generation_service().generate(save_path, user_hint).as_dict()
     except QwenConfigurationError as exc:
         return generation_error_response(503, "qwen_api_error", "Qwen API 调用失败", errors=[{"path": "QWEN_API_KEY", "message": str(exc)}])
     except QwenRequestError as exc:
@@ -256,8 +307,9 @@ async def composition_generate_param_json_by_workflow(
         return workflow_error_response(500, "图片保存失败", errors=[{"path": "image", "message": str(exc)}])
     relative_url_path = f"static/uploads/workflow_inputs/{save_name}"
     try:
-        public_base_url = workflow_param_generation_service._required_env("PUBLIC_BASE_URL")
-        image_url = workflow_param_generation_service.public_image_url(public_base_url, relative_url_path)
+        workflow_service = get_workflow_param_generation_service()
+        public_base_url = workflow_service._required_env("PUBLIC_BASE_URL")
+        image_url = workflow_service.public_image_url(public_base_url, relative_url_path)
     except WorkflowConfigurationError as exc:
         return workflow_error_response(500, "公网 URL 生成失败", errors=[{"path": "PUBLIC_BASE_URL", "message": str(exc)}])
     try:
@@ -268,7 +320,7 @@ async def composition_generate_param_json_by_workflow(
             content=content,
             content_type=image.content_type,
         )
-        result = workflow_param_generation_service.generate(image_url, user_hint, image_debug=image_debug)
+        result = get_workflow_param_generation_service().generate(image_url, user_hint, image_debug=image_debug)
         return result.as_dict()
     except WorkflowConfigurationError as exc:
         return workflow_error_response(503, "调用阿里云智能体应用失败：环境变量未配置", image_url=image_url, errors=[{"path": "env", "message": str(exc)}])
@@ -317,7 +369,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict:
 @app.post("/composition/extract-elements", response_model=ExtractElementsResponse)
 def composition_extract_elements(payload: ExtractElementsRequest) -> dict:
     try:
-        return extract_service.extract(payload.image_url, ExtractConfig(payload.max_layers, payload.min_area))
+        return get_extract_service().extract(payload.image_url, ExtractConfig(payload.max_layers, payload.min_area))
     except ExtractError as exc:
         return {
             "status": "error",
@@ -345,4 +397,6 @@ def composition_extract_elements(payload: ExtractElementsRequest) -> dict:
         }
 
 
+startup_log(f"after registering routes ({len(app.routes)} routes before static mount)")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+startup_log("after mounting static files")
