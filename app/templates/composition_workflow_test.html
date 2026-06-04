@@ -151,8 +151,16 @@ function setWorkflowDebug(body){
     prompt_length: upstream.prompt_length ?? null,
     biz_params_keys: upstream.biz_params_keys || [],
     image_input_debug: upstream.image_input_debug || null,
+    image_url_check_mode: upstream.image_url_check_mode ?? upstream.image_input_debug?.image_url_check_mode ?? null,
+    public_image_url: upstream.public_image_url ?? upstream.image_input_debug?.public_image_url ?? body.image_url ?? null,
+    local_file_exists: upstream.local_file_exists ?? upstream.image_input_debug?.local_file_exists ?? null,
+    local_file_size_bytes: upstream.local_file_size_bytes ?? upstream.image_input_debug?.local_file_size_bytes ?? null,
+    image_url_host: upstream.image_url_host ?? upstream.image_input_debug?.image_url_host ?? null,
+    application_call_attempted: upstream.application_call_attempted ?? upstream.image_input_debug?.application_call_attempted ?? false,
     image_url_reachable: upstream.image_url_reachable ?? upstream.image_input_debug?.image_url_reachable ?? null,
     image_url_status: upstream.image_url_status ?? upstream.image_input_debug?.image_url_status ?? null,
+    image_url_check_warning: upstream.image_url_check_warning ?? upstream.image_input_debug?.image_url_check_warning ?? null,
+    image_url_error: upstream.image_url_error ?? upstream.image_input_debug?.image_url_error ?? null,
     raw_text_length: upstream.raw_text_length ?? (body.raw_text || '').length,
     chunk_count: upstream.chunk_count ?? 0,
     token_usage: upstream.token_usage || null,
@@ -175,7 +183,11 @@ function workflowErrorSummary(body){
   if(debug.error_message) parts.push(debug.error_message);
   if(debug.prompt_length !== undefined) parts.push(`prompt_length=${debug.prompt_length}`);
   if(debug.biz_params_keys) parts.push(`biz_params_keys=${(debug.biz_params_keys || []).join(',')}`);
+  if(debug.image_url_check_mode !== undefined) parts.push(`image_url_check_mode=${debug.image_url_check_mode}`);
   if(debug.image_url_reachable !== undefined) parts.push(`image_url_reachable=${debug.image_url_reachable}`);
+  if(debug.local_file_exists !== undefined) parts.push(`local_file_exists=${debug.local_file_exists}`);
+  if(debug.application_call_attempted !== undefined) parts.push(`application_call_attempted=${debug.application_call_attempted}`);
+  if(debug.image_url_check_warning) parts.push(debug.image_url_check_warning);
   if(body.upstream_body_preview) parts.push(body.upstream_body_preview.slice(0, 240));
   if(body.raw_text) parts.push(`raw_text=${body.raw_text.slice(0, 240)}`);
   if((body.dropped_elements || []).length) parts.push(`dropped_elements=${body.dropped_elements.length}`);

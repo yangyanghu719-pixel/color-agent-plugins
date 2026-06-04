@@ -215,6 +215,77 @@ def test_image_url_unreachable_blocks_application_call(monkeypatch):
     assert exc_info.value.upstream_debug["image_url_status"] == 404
 
 
+
+def test_same_host_local_file_check_continues_application_call(monkeypatch, tmp_path):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    image_path = tmp_path / "a.png"
+    image_path.write_bytes(b"png-bytes")
+    image_debug = {
+        "image_size_bytes": image_path.stat().st_size,
+        "image_mime_type": "image/png",
+        "source_width": 10,
+        "source_height": 20,
+        **aliyun_service.build_local_file_image_url_check("https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png", image_path),
+    }
+    monkeypatch.setattr(aliyun_service, "check_public_image_url", lambda image_url: (_ for _ in ()).throw(AssertionError("same-host URL must not use HTTP self-check")))
+    called = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        called["count"] += 1
+        return FakeJsonResponse({"output": {"text": json.dumps(_sample_json(), ensure_ascii=False)}})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.call_application(
+        "https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png",
+        stream=False,
+        image_debug=image_debug,
+    )
+
+    assert called["count"] == 1
+    assert result.upstream_debug["image_url_check_mode"] == "local_file_check"
+    assert result.upstream_debug["local_file_exists"] is True
+    assert result.upstream_debug["image_url_reachable"] == "skipped_same_host"
+    assert result.upstream_debug["application_call_attempted"] is True
+
+
+def test_local_file_missing_blocks_with_clear_error(monkeypatch, tmp_path):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    missing_path = tmp_path / "missing.png"
+    image_debug = {
+        "image_size_bytes": 0,
+        "image_mime_type": "image/png",
+        **aliyun_service.build_local_file_image_url_check(
+            "https://composition-lab.onrender.com/static/uploads/workflow_inputs/missing.png",
+            missing_path,
+        ),
+    }
+    called = {"count": 0}
+
+    def fake_urlopen(*args, **kwargs):
+        called["count"] += 1
+        return FakeJsonResponse({})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(WorkflowRequestError) as exc_info:
+        service.call_application(
+            "https://composition-lab.onrender.com/static/uploads/workflow_inputs/missing.png",
+            stream=False,
+            image_debug=image_debug,
+        )
+
+    assert called["count"] == 0
+    assert "图片本地文件不存在" in str(exc_info.value)
+    assert exc_info.value.upstream_debug["local_file_exists"] is False
+    assert exc_info.value.upstream_debug["application_call_attempted"] is False
+
 def test_fallback_disabled_makes_single_upstream_attempt(monkeypatch):
     import app.services.aliyun_workflow_param_generation_service as aliyun_service
 
