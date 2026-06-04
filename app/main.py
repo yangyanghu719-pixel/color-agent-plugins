@@ -45,10 +45,8 @@ startup_log("after creating FastAPI app")
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 WORKFLOW_INPUT_DIR = UPLOAD_DIR / "workflow_inputs"
-ALIYUN_APP_INPUT_DIR = UPLOAD_DIR / "aliyun_app_inputs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
-ALIYUN_APP_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -226,11 +224,19 @@ def aliyun_app_chat_test_error_response(
         status_code=status_code,
         content={
             "ok": False,
+            "error": message,
             "message": message,
             "public_image_url": public_image_url,
-            "request_debug": request_debug or {},
             "upstream_status": upstream_status,
+            "sse_event_count": 0,
+            "text_mode": "snapshot_latest_text",
             "final_text": "",
+            "final_text_length": 0,
+            "raw_text_preview": full_raw_preview[:1200],
+            "textarea_json": "",
+            "parsed_json": None,
+            "recent_data_previews": [],
+            "request_debug": request_debug or {},
             "raw_sse_data_lines": [],
             "parsed_events": [],
             "text_fragments": [],
@@ -297,13 +303,29 @@ async def aliyun_app_chat_test_send(
     if not content:
         return aliyun_app_chat_test_error_response(400, "上传文件为空")
     save_name = f"aliyun-app-input-{uuid4().hex}{ext}"
-    save_path = ALIYUN_APP_INPUT_DIR / save_name
-    public_image_url = f"https://composition-lab.onrender.com/static/uploads/aliyun_app_inputs/{save_name}"
+    save_path = WORKFLOW_INPUT_DIR / save_name
+    public_image_url = f"https://composition-lab.onrender.com/static/uploads/workflow_inputs/{save_name}"
     try:
         save_path.write_bytes(content)
     except OSError as exc:
         return aliyun_app_chat_test_error_response(500, "图片保存失败", public_image_url=public_image_url, upstream_debug=default_upstream_debug(str(exc)))
-    result = await run_in_threadpool(get_aliyun_app_chat_test_service().call, public_image_url, prompt)
+    print(
+        "[aliyun-app-chat-test] upload debug",
+        {
+            "filename": save_name,
+            "local_saved_path": str(save_path),
+            "public_image_url": public_image_url,
+            "prompt": (prompt or "").strip() or "go",
+        },
+        flush=True,
+    )
+    result = await run_in_threadpool(
+        get_aliyun_app_chat_test_service().call,
+        public_image_url,
+        prompt,
+        filename=save_name,
+        local_saved_path=str(save_path),
+    )
     body = result.as_dict()
     status_code = 200 if result.ok else 502
     error_message = result.upstream_debug.get("error_message")
