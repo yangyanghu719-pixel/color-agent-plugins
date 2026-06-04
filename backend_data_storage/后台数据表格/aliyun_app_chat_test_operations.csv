@@ -1,5 +1,5 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
-task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:55:03+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,"{
+task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:55:22+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,"{
   ""version"": ""1.0"",
   ""canvas"": {
     ""width"": 1000,
@@ -200,4 +200,4 @@ task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:55:03+00:00,go
       ""height"": 0.3,
       ""fill"": ""#FFD54F"",
       ""opacity"": 0.15,
-      ""rotation"": 0.0,",,,,,,,ai_generation,智能体分析得到原始图元
+      ""rotation"": 0.0,",https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-a-cec5425cdd984f278867ea028f6a5019.png,,,,,,save_comparison_image,保存composition图 A
