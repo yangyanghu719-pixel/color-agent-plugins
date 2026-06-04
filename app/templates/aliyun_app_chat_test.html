@@ -614,7 +614,7 @@
     let requestInFlight = false;
     let abSlots = { A: null, B: null };
     let colorAbSlots = { A: null, B: null };
-    let abRequestInFlight = false;
+    let abRequestInFlight = { composition: false, color: false };
 
     const comparisonConfigs = {
       composition: {
@@ -1435,12 +1435,12 @@
 
 
 
-    function setAbBusy(isBusy, label = '处理中…') {
-      abRequestInFlight = isBusy;
-      Object.values(comparisonConfigs).forEach((config) => {
-        config.buttonIds.forEach((id) => { $(id).disabled = isBusy; });
-        $(config.analyzeButtonId).textContent = isBusy ? label : config.idleAnalyzeLabel;
-      });
+    function setAbBusy(kind, isBusy, label = '处理中…') {
+      const config = comparisonConfigs[kind];
+      if (!config) return;
+      abRequestInFlight[kind] = isBusy;
+      config.buttonIds.forEach((id) => { $(id).disabled = isBusy; });
+      $(config.analyzeButtonId).textContent = isBusy ? label : config.idleAnalyzeLabel;
     }
 
     function canvasExportDimensions() {
@@ -1515,8 +1515,8 @@
 
     async function saveCurrentAs(kind, slot) {
       const config = comparisonConfigs[kind];
-      if (abRequestInFlight) return;
-      setAbBusy(true, '保存中…');
+      if (abRequestInFlight[kind]) return;
+      setAbBusy(kind, true, '保存中…');
       config.statusEl.textContent = `正在保存${config.saveNoun}图 ${slot}…`;
       try {
         const dataUrl = await currentCanvasDataUrl();
@@ -1533,18 +1533,18 @@
       } catch (err) {
         config.statusEl.textContent = err.message || String(err);
       } finally {
-        setAbBusy(false);
+        setAbBusy(kind, false);
       }
     }
 
     async function analyzeAb(kind = 'composition') {
       const config = comparisonConfigs[kind];
-      if (abRequestInFlight) return;
+      if (abRequestInFlight[kind]) return;
       if (!config.slots.A?.['public_' + 'image_url'] || !config.slots.B?.['public_' + 'image_url']) {
         config.statusEl.textContent = config.missingMessage;
         return;
       }
-      setAbBusy(true, '分析中…');
+      setAbBusy(kind, true, '分析中…');
       config.statusEl.textContent = config.analyzingMessage;
       config.outputEl.textContent = '分析中，请稍候…';
       try {
@@ -1561,7 +1561,7 @@
         config.outputEl.textContent = '';
         config.statusEl.textContent = err.message || String(err);
       } finally {
-        setAbBusy(false);
+        setAbBusy(kind, false);
       }
     }
 
