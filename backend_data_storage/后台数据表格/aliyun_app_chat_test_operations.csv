@@ -1,2 +1,203 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
-task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:54:17+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,,,,,,,,manual_upload,手动上传图片
+task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:55:03+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,"{
+  ""version"": ""1.0"",
+  ""canvas"": {
+    ""width"": 1000,
+    ""height"": 562,
+    ""background"": ""#FFFFFF""
+  },
+  ""source_summary"": {
+    ""input_type"": ""image_upload"",
+    ""abstract_style"": ""geometric_constructivism"",
+    ""visual_center"": [
+      0.48,
+      0.62
+    ],
+    ""balance"": ""centered"",
+    ""density"": ""low"",
+    ""main_subject"": ""hill"",
+    ""subject_region"": [
+      0.0,
+      0.54,
+      1.0,
+      0.46
+    ],
+    ""subject_priority"": ""high"",
+    ""image_palette"": [
+      ""#1A73E8"",
+      ""#FFFFFF"",
+      ""#4CAF50"",
+      ""#388E3C"",
+      ""#FFD54F""
+    ]
+  },
+  ""elements"": [
+    {
+      ""id"": ""bg_sky"",
+      ""type"": ""rectangle"",
+      ""role"": ""background_support"",
+      ""x"": 0.0,
+      ""y"": 0.0,
+      ""width"": 1.0,
+      ""height"": 0.55,
+      ""fill"": ""#1A73E8"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 1
+    },
+    {
+      ""id"": ""cloud_1"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.02,
+      ""y"": 0.03,
+      ""width"": 0.22,
+      ""height"": 0.08,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_2"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.19,
+      ""y"": 0.22,
+      ""width"": 0.14,
+      ""height"": 0.06,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_3"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.43,
+      ""y"": 0.35,
+      ""width"": 0.18,
+      ""height"": 0.11,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_4"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.65,
+      ""y"": 0.39,
+      ""width"": 0.16,
+      ""height"": 0.09,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_5"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.72,
+      ""y"": 0.44,
+      ""width"": 0.24,
+      ""height"": 0.13,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_6"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.55,
+      ""y"": 0.51,
+      ""width"": 0.12,
+      ""height"": 0.05,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""hill_main"",
+      ""type"": ""rectangle"",
+      ""role"": ""dominant_plane"",
+      ""x"": 0.0,
+      ""y"": 0.54,
+      ""width"": 1.0,
+      ""height"": 0.46,
+      ""fill"": ""#4CAF50"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 3
+    },
+    {
+      ""id"": ""hill_shadow"",
+      ""type"": ""rectangle"",
+      ""role"": ""support_plane"",
+      ""x"": 0.55,
+      ""y"": 0.54,
+      ""width"": 0.45,
+      ""height"": 0.46,
+      ""fill"": ""#388E3C"",
+      ""opacity"": 0.9,
+      ""rotation"": 0.0,
+      ""z_index"": 4
+    },
+    {
+      ""id"": ""foreground_grass"",
+      ""type"": ""rectangle"",
+      ""role"": ""accent_plane"",
+      ""x"": 0.0,
+      ""y"": 0.85,
+      ""width"": 1.0,
+      ""height"": 0.15,
+      ""fill"": ""#4CAF50"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 5
+    },
+    {
+      ""id"": ""field_line"",
+      ""type"": ""line"",
+      ""role"": ""structural_line"",
+      ""x1"": 0.0,
+      ""y1"": 0.85,
+      ""x2"": 1.0,
+      ""y2"": 0.85,
+      ""stroke"": ""#388E3C"",
+      ""stroke_width"": 0.003,
+      ""style"": ""solid"",
+      ""opacity"": 1.0,
+      ""z_index"": 6
+    },
+    {
+      ""id"": ""distant_hills"",
+      ""type"": ""trapezoid"",
+      ""role"": ""support_plane"",
+      ""x"": 0.82,
+      ""y"": 0.61,
+      ""width"": 0.18,
+      ""height"": 0.06,
+      ""fill"": ""#388E3C"",
+      ""opacity"": 0.8,
+      ""rotation"": 0.0,
+      ""top_ratio"": 0.7,
+      ""z_index"": 7
+    },
+    {
+      ""id"": ""sunlight_gradient"",
+      ""type"": ""rectangle"",
+      ""role"": ""accent_plane"",
+      ""x"": 0.3,
+      ""y"": 0.54,
+      ""width"": 0.4,
+      ""height"": 0.3,
+      ""fill"": ""#FFD54F"",
+      ""opacity"": 0.15,
+      ""rotation"": 0.0,",,,,,,,ai_generation,智能体分析得到原始图元
