@@ -90,6 +90,7 @@ class WorkflowGenerationResult:
             "raw_workflow_response": self.raw_workflow_response,
             "raw_text": self.raw_text,
             "document": self.document,
+            "parsed_json": self.document,
             "textarea_json": self.textarea_json,
             "warnings": self.warnings,
             "dropped_elements": self.dropped_elements,
