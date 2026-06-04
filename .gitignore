@@ -4,3 +4,6 @@ static/uploads/*
 !static/uploads/.gitkeep
 static/outputs/*
 !static/outputs/.gitkeep
+
+static/operation_data/*
+!static/operation_data/.gitkeep

@@ -286,3 +286,34 @@ def test_aliyun_app_chat_test_analyze_ab_color_uses_color_teacher_prompt(monkeyp
     assert "色彩关系" in color_prompt
     assert "构图而不是" not in color_prompt
     assert body["request_debug"]["analysis_type"] == "color"
+
+
+def test_aliyun_app_chat_test_page_has_operation_log_controls():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    assert "操作数据收集" in resp.text
+    assert 'id="downloadOperationCsvBtn"' in resp.text
+    assert "/aliyun-app-chat-test/operation-log" in resp.text
+    assert "/aliyun-app-chat-test/operation-log.csv" in resp.text
+    assert "task_id" in resp.text
+
+
+def test_aliyun_app_chat_test_operation_log_records_csv_row():
+    task_id = "pytest-task-001"
+
+    resp = client.post(
+        "/aliyun-app-chat-test/operation-log",
+        json={"task_id": task_id, "event_type": "button_click", "event_label": "生成 JSON"},
+    )
+    csv_resp = client.get("/aliyun-app-chat-test/operation-log.csv")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "task_id": task_id}
+    assert csv_resp.status_code == 200
+    assert "text/csv" in csv_resp.headers["content-type"]
+    csv_text = csv_resp.content.decode("utf-8-sig")
+    assert "task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image" in csv_text
+    assert task_id in csv_text
+    assert "button_click" in csv_text
+    assert "生成 JSON" in csv_text

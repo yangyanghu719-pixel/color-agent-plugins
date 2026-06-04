@@ -1,15 +1,19 @@
 from pathlib import Path
 import base64
 import binascii
+import csv
+from datetime import datetime, timezone
+import json
 import logging
 import mimetypes
 import re
+import threading
 import urllib.parse
 from uuid import uuid4
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -48,8 +52,12 @@ startup_log("after creating FastAPI app")
 ALLOWED_UPLOAD_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 UPLOAD_DIR = Path("static/uploads")
 WORKFLOW_INPUT_DIR = UPLOAD_DIR / "workflow_inputs"
+OPERATION_DATA_DIR = Path("static/operation_data")
+OPERATION_CSV_PATH = OPERATION_DATA_DIR / "aliyun_app_chat_test_operations.csv"
+OPERATION_JSONL_PATH = OPERATION_DATA_DIR / "aliyun_app_chat_test_events.jsonl"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOW_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+OPERATION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 startup_log("upload directories ensured with mkdir only")
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AB_COMPOSITION_IMAGE_BYTES = 7 * 1024 * 1024
@@ -101,6 +109,85 @@ def get_workflow_param_generation_service() -> AliyunWorkflowParamGenerationServ
 
 def get_aliyun_app_chat_test_service() -> AliyunAppChatTestService:
     return aliyun_app_chat_test_service._get()
+
+
+OPERATION_TABLE_COLUMNS = [
+    "task_id",
+    "created_at",
+    "updated_at",
+    "prompt",
+    "manual_uploaded_image",
+    "ai_raw_image",
+    "composition_image_a",
+    "composition_image_b",
+    "composition_analysis_result",
+    "color_image_a",
+    "color_image_b",
+    "color_analysis_result",
+    "last_event_type",
+    "last_event_label",
+]
+OPERATION_LOG_LOCK = threading.Lock()
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def safe_task_id(value: Any | None = None) -> str:
+    raw = str(value or "").strip()
+    if raw and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", raw):
+        return raw
+    return uuid4().hex[:12]
+
+
+def truncate_cell(value: Any, max_chars: int = 4000) -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return text[:max_chars]
+
+
+def read_operation_rows() -> dict[str, dict[str, str]]:
+    if not OPERATION_CSV_PATH.exists():
+        return {}
+    with OPERATION_CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file_obj:
+        return {row["task_id"]: {column: row.get(column, "") for column in OPERATION_TABLE_COLUMNS} for row in csv.DictReader(file_obj) if row.get("task_id")}
+
+
+def write_operation_rows(rows: dict[str, dict[str, str]]) -> None:
+    with OPERATION_CSV_PATH.open("w", encoding="utf-8-sig", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=OPERATION_TABLE_COLUMNS)
+        writer.writeheader()
+        writer.writerows(sorted(rows.values(), key=lambda row: row.get("created_at", "")))
+
+
+def record_aliyun_app_operation(task_id: Any | None, event_type: str, event_label: str = "", **updates: Any) -> str:
+    task_key = safe_task_id(task_id)
+    now = utc_now_iso()
+    with OPERATION_LOG_LOCK:
+        rows = read_operation_rows()
+        row = rows.get(task_key) or {column: "" for column in OPERATION_TABLE_COLUMNS}
+        row["task_id"] = task_key
+        row["created_at"] = row.get("created_at") or now
+        row["updated_at"] = now
+        row["last_event_type"] = truncate_cell(event_type, 200)
+        row["last_event_label"] = truncate_cell(event_label, 500)
+        for key, value in updates.items():
+            if key in OPERATION_TABLE_COLUMNS and value is not None:
+                row[key] = truncate_cell(value)
+        rows[task_key] = row
+        write_operation_rows(rows)
+        event_payload = {
+            "created_at": now,
+            "task_id": task_key,
+            "event_type": event_type,
+            "event_label": event_label,
+            "updates": {key: truncate_cell(value) for key, value in updates.items()},
+        }
+        with OPERATION_JSONL_PATH.open("a", encoding="utf-8") as file_obj:
+            file_obj.write(json.dumps(event_payload, ensure_ascii=False) + "\n")
+    return task_key
 
 
 def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | None = None) -> dict[str, Any]:
@@ -314,6 +401,7 @@ def aliyun_app_chat_test() -> HTMLResponse:
 async def aliyun_app_chat_test_send(
     image: UploadFile | None = File(default=None),
     prompt: str | None = Form(default="go"),
+    task_id: str | None = Form(default=None),
 ):
     if image is None or not image.filename:
         return aliyun_app_chat_test_error_response(400, "请上传图片（png/jpg/jpeg/webp）")
@@ -323,6 +411,7 @@ async def aliyun_app_chat_test_send(
     content = await image.read()
     if not content:
         return aliyun_app_chat_test_error_response(400, "上传文件为空")
+    task_key = safe_task_id(task_id)
     save_name = f"aliyun-app-input-{uuid4().hex}{ext}"
     save_path = WORKFLOW_INPUT_DIR / save_name
     public_image_url = aliyun_app_chat_test_public_workflow_url(save_name)
@@ -340,6 +429,13 @@ async def aliyun_app_chat_test_send(
         },
         flush=True,
     )
+    record_aliyun_app_operation(
+        task_key,
+        "manual_upload",
+        "手动上传图片",
+        prompt=(prompt or "").strip() or "go",
+        manual_uploaded_image=public_image_url,
+    )
     result = await run_in_threadpool(
         get_aliyun_app_chat_test_service().call,
         public_image_url,
@@ -348,6 +444,11 @@ async def aliyun_app_chat_test_send(
         local_saved_path=str(save_path),
     )
     body = result.as_dict()
+    body["task_id"] = task_key
+    if result.ok:
+        record_aliyun_app_operation(task_key, "ai_generation", "智能体分析得到原始图元", ai_raw_image=result.textarea_json)
+    else:
+        record_aliyun_app_operation(task_key, "ai_generation_failed", result.message or result.error)
     status_code = 200 if result.ok else 502
     error_message = result.upstream_debug.get("error_message")
     if result.upstream_status is None and isinstance(error_message, str) and error_message.startswith("缺少环境变量"):
@@ -380,10 +481,19 @@ async def aliyun_app_chat_test_save_composition_image(payload: dict[str, Any]):
         save_path.write_bytes(content)
     except OSError:
         return JSONResponse(status_code=500, content={"ok": False, "message": "保存 A/B 图片失败"})
+    comparison_kind = str(payload.get("kind") or "composition")
+    image_column_prefix = "color_image_" if comparison_kind == "color" else "composition_image_"
+    task_key = record_aliyun_app_operation(
+        payload.get("task_id"),
+        "save_comparison_image",
+        f"保存{comparison_kind}图 {slot}",
+        **{image_column_prefix + slot.lower(): aliyun_app_chat_test_public_workflow_url(save_name)},
+    )
     return {
         "ok": True,
         "message": f"图 {slot} 已保存",
         "slot": slot,
+        "task_id": task_key,
         "public_image_url": aliyun_app_chat_test_public_workflow_url(save_name),
         "static_path": f"/static/uploads/workflow_inputs/{save_name}",
         "mime_type": mime_type,
@@ -399,13 +509,15 @@ async def aliyun_app_chat_test_analyze_ab(payload: dict[str, Any]):
         return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存图 A 和图 B"})
     if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
         return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    task_key = safe_task_id(payload.get("task_id"))
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_composition_ab, image_a_url, image_b_url)
+    record_aliyun_app_operation(task_key, "composition_analysis", "构图分析结果", composition_analysis_result=result.analysis if result.ok else result.message)
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
-    return JSONResponse(status_code=status_code, content=result.as_dict())
-
-
+    body = result.as_dict()
+    body["task_id"] = task_key
+    return JSONResponse(status_code=status_code, content=body)
 
 
 @app.post("/aliyun-app-chat-test/analyze-ab-color")
@@ -416,11 +528,36 @@ async def aliyun_app_chat_test_analyze_ab_color(payload: dict[str, Any]):
         return JSONResponse(status_code=400, content={"ok": False, "message": "请先分别保存色彩图 A 和色彩图 B"})
     if not is_allowed_ab_image_url(image_a_url) or not is_allowed_ab_image_url(image_b_url):
         return JSONResponse(status_code=400, content={"ok": False, "message": "A/B 图片 URL 必须来自当前页面保存的公网图片"})
+    task_key = safe_task_id(payload.get("task_id"))
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_color_ab, image_a_url, image_b_url)
+    record_aliyun_app_operation(task_key, "color_analysis", "色彩分析结果", color_analysis_result=result.analysis if result.ok else result.message)
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
-    return JSONResponse(status_code=status_code, content=result.as_dict())
+    body = result.as_dict()
+    body["task_id"] = task_key
+    return JSONResponse(status_code=status_code, content=body)
+
+
+@app.post("/aliyun-app-chat-test/operation-log")
+def aliyun_app_chat_test_operation_log(payload: dict[str, Any]):
+    task_key = record_aliyun_app_operation(
+        payload.get("task_id"),
+        str(payload.get("event_type") or "ui_operation"),
+        str(payload.get("event_label") or ""),
+    )
+    return {"ok": True, "task_id": task_key}
+
+
+@app.get("/aliyun-app-chat-test/operation-log.csv")
+def aliyun_app_chat_test_operation_log_csv():
+    if not OPERATION_CSV_PATH.exists():
+        write_operation_rows({})
+    return FileResponse(
+        OPERATION_CSV_PATH,
+        media_type="text/csv; charset=utf-8",
+        filename="aliyun_app_chat_test_operations.csv",
+    )
 
 
 @app.post("/composition/validate-param-json")
