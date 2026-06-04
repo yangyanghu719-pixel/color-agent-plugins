@@ -1443,6 +1443,60 @@
       });
     }
 
+    function canvasExportDimensions() {
+      const canvas = documentState?.canvas || {};
+      return {
+        width: Math.max(1, Math.round(num(canvas.width, 1000))),
+        height: Math.max(1, Math.round(num(canvas.height, 1000))),
+        background: canvas.background || '#FFFFFF',
+      };
+    }
+
+    function currentCanvasSvgBlobUrl() {
+      const { width, height, background } = canvasExportDimensions();
+      const svg = $('canvas').cloneNode(true);
+      svg.setAttribute('xmlns', svgNs);
+      svg.setAttribute('width', String(width));
+      svg.setAttribute('height', String(height));
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.style.background = '';
+      svg.querySelector('#selectionOverlay')?.remove();
+
+      const backgroundRect = create('rect');
+      backgroundRect.setAttribute('x', '0');
+      backgroundRect.setAttribute('y', '0');
+      backgroundRect.setAttribute('width', String(width));
+      backgroundRect.setAttribute('height', String(height));
+      backgroundRect.setAttribute('fill', background);
+      svg.insertBefore(backgroundRect, svg.firstChild);
+
+      const serialized = new XMLSerializer().serializeToString(svg);
+      const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+      return URL.createObjectURL(blob);
+    }
+
+    async function currentCanvasDataUrl() {
+      const { width, height } = canvasExportDimensions();
+      const blobUrl = currentCanvasSvgBlobUrl();
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error('当前画布导出失败，请稍后重试。'));
+          image.src = blobUrl;
+        });
+        const output = document.createElement('canvas');
+        output.width = width;
+        output.height = height;
+        const ctx = output.getContext('2d');
+        if (!ctx) throw new Error('当前浏览器不支持画布导出。');
+        ctx.drawImage(img, 0, 0, width, height);
+        return output.toDataURL('image/png');
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+    }
+
     function renderAbSlot(kind, slot, data) {
       const config = comparisonConfigs[kind];
       const img = $(config.thumbIds[slot]);

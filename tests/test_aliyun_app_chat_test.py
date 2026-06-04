@@ -200,6 +200,8 @@ def test_aliyun_app_chat_test_page_has_ab_comparison_controls():
     assert "/aliyun-app-chat-test/save-composition-image" in resp.text
     assert "/aliyun-app-chat-test/analyze-ab" in resp.text
     assert "/aliyun-app-chat-test/analyze-ab-color" in resp.text
+    assert "async function currentCanvasDataUrl()" in resp.text
+    assert "currentCanvasSvgBlobUrl" in resp.text
 
 
 def test_aliyun_app_chat_test_save_composition_image_returns_public_url():
