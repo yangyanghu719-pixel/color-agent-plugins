@@ -28,6 +28,7 @@
     .workflow-box label { display:block; font-size:12px; color:#374151; margin-top:8px; }
     .workflow-box input[type="text"] { width:100%; box-sizing:border-box; padding:6px; }
     .workflow-status { margin-top:8px; min-height:20px; font-size:13px; color:#1e40af; }
+    .workflow-debug { margin-top:8px; max-height:220px; overflow:auto; background:#0f172a; color:#d1fae5; padding:8px; border-radius:6px; font-size:12px; white-space:pre-wrap; }
     .workflow-progress { height:6px; background:#dbeafe; border-radius:999px; overflow:hidden; margin-top:8px; display:none; }
     .workflow-progress.active { display:block; }
     .workflow-progress span { display:block; height:100%; width:35%; background:#2563eb; border-radius:999px; animation: workflowSlide 1s linear infinite; }
@@ -39,7 +40,7 @@
 <div class="layout">
   <div class="panel">
     <div class="workflow-box" id="workflow-zone">
-      <h4>工作流生成区</h4>
+      <h4>视觉智能体应用生成区（原工作流生成区）</h4>
       <label for="workflow-image">上传图片（jpg/jpeg/png/webp）</label>
       <input id="workflow-image" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
       <label for="workflow-hint">可选 user_hint</label>
@@ -49,6 +50,7 @@
       </div>
       <div id="workflow-status" class="workflow-status" aria-live="polite">待命</div>
       <div id="workflow-progress" class="workflow-progress" aria-hidden="true"><span></span></div>
+      <pre id="workflow-debug" class="workflow-debug">debug 信息待命</pre>
     </div>
     <div class="btns">
       <button id="load">加载示例 JSON</button>
@@ -133,12 +135,36 @@ function setWorkflowStatus(text, active=false){
   if(status) status.textContent = text;
   if(progress) progress.classList.toggle('active', Boolean(active));
 }
+function truncateText(text, max=1600){
+  if(!text) return '';
+  const value = String(text);
+  return value.length > max ? `${value.slice(0, max)}\n...（已截断 ${value.length - max} 字符）` : value;
+}
+function setWorkflowDebug(body){
+  const node = $('workflow-debug');
+  if(!node) return;
+  if(!body){ node.textContent = 'debug 信息待命'; return; }
+  const debug = {
+    raw_text: truncateText(body.raw_text || ''),
+    warnings: body.warnings || [],
+    dropped_elements: body.dropped_elements || [],
+    strict_validation: body.strict_validation || null,
+    upstream_debug: body.upstream_debug || null,
+    errors: body.errors || [],
+  };
+  node.textContent = JSON.stringify(debug, null, 2);
+}
 function workflowErrorSummary(body){
-  if(!body) return '';
+  if(!body) return '生成失败：后端无响应体';
+  const debug = body.upstream_debug || {};
   const parts = [body.message || '生成失败'];
-  if(body.upstream_status) parts.push(`HTTP ${body.upstream_status}`);
-  if(body.upstream_body_preview) parts.push(body.upstream_body_preview.slice(0, 200));
-  if(body.raw_text) parts.push(body.raw_text.slice(0, 200));
+  const statusCode = debug.status_code || body.upstream_status;
+  if(statusCode) parts.push(`HTTP ${statusCode}`);
+  if(debug.request_id) parts.push(`request_id=${debug.request_id}`);
+  if(debug.error_message) parts.push(debug.error_message);
+  if(body.upstream_body_preview) parts.push(body.upstream_body_preview.slice(0, 240));
+  if(body.raw_text) parts.push(`raw_text=${body.raw_text.slice(0, 240)}`);
+  if((body.dropped_elements || []).length) parts.push(`dropped_elements=${body.dropped_elements.length}`);
   return parts.filter(Boolean).join(' | ');
 }
 async function generateByWorkflow(){
@@ -163,13 +189,16 @@ async function generateByWorkflow(){
   form.append('user_hint', $('workflow-hint').value || '');
   button.disabled = true;
   try{
-    setWorkflowStatus('正在上传图片...', true);
+    setWorkflowDebug(null);
+    setWorkflowStatus('上传中...', true);
     await new Promise(resolve => setTimeout(resolve, 80));
-    setWorkflowStatus('正在调用阿里云工作流...', true);
+    setWorkflowStatus('调用中：正在请求阿里云视觉智能体应用...', true);
     const resp = await fetch('/composition/generate-param-json-by-workflow', { method:'POST', body: form });
-    setWorkflowStatus('正在解析返回结果...', true);
+    setWorkflowStatus('正在接收流式输出（后端聚合中）...', true);
     let body = null;
-    try { body = await resp.json(); } catch(e) { body = { ok:false, message:'后端返回了非 JSON 响应' }; }
+    try { body = await resp.json(); } catch(e) { body = { ok:false, message:'后端返回了非 JSON 响应', upstream_debug:{error_message:e.message} }; }
+    setWorkflowStatus('解析中：提取 JSON 并清洗元素...', true);
+    setWorkflowDebug(body);
     if(!resp.ok || !body.ok){
       $('json').value = before;
       const msg = workflowErrorSummary(body);
@@ -177,13 +206,25 @@ async function generateByWorkflow(){
       setMessage('', msg);
       return;
     }
-    $('json').value = body.textarea_json || JSON.stringify(body.document, null, 2);
-    setWorkflowStatus('生成成功，可点击渲染 JSON');
-    setMessage('生成成功，可点击渲染 JSON', '');
+    const cleanedDocument = body.document;
+    if(!cleanedDocument){
+      const msg = workflowErrorSummary({...body, message: body.message || '清洗后没有 document'});
+      setWorkflowStatus(`生成失败：${msg}`);
+      setMessage('', msg);
+      return;
+    }
+    setWorkflowStatus('清洗中：写入 cleaned document...', true);
+    $('json').value = body.textarea_json || JSON.stringify(cleanedDocument, null, 2);
+    documentState = cleanedDocument;
+    selectedId = null;
+    syncAndRender();
+    setWorkflowStatus('成功：已渲染 cleaned document');
+    const debugMsg = `warnings=${(body.warnings || []).length}, dropped_elements=${(body.dropped_elements || []).length}, request_id=${body.upstream_debug?.request_id || 'N/A'}`;
+    setMessage('生成成功：后端已聚合流式输出、提取 JSON、清洗并渲染 cleaned document', debugMsg);
   }catch(e){
     $('json').value = before;
     setWorkflowStatus(`生成失败：${e.message || e}`);
-    setMessage('', `调用阿里云工作流失败：${e.message || e}`);
+    setMessage('', `调用阿里云视觉智能体应用失败：${e.message || e}`);
   }finally{
     button.disabled = false;
     $('workflow-progress').classList.remove('active');

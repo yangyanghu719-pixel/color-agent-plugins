@@ -73,20 +73,35 @@ def workflow_error_response(
     errors: list[dict[str, str]] | None = None,
     upstream_status: int | None = None,
     upstream_body_preview: str = "",
+    upstream_debug: dict[str, Any] | None = None,
 ) -> JSONResponse:
+    debug = upstream_debug or {
+        "request_id": None,
+        "status_code": upstream_status,
+        "chunk_count": 0,
+        "first_chunk_ms": None,
+        "total_elapsed_ms": None,
+        "finish_reason": None,
+        "error_message": message,
+    }
     return JSONResponse(
         status_code=status_code,
         content={
             "ok": False,
+            "valid": False,
             "message": message,
             "image_url": image_url,
             "raw_workflow_response": raw_workflow_response,
             "raw_text": raw_text,
             "document": None,
             "textarea_json": "",
+            "warnings": [],
+            "dropped_elements": [],
+            "strict_validation": {"valid": False, "errors": errors or [{"path": "", "message": message}]},
             "errors": errors or [{"path": "", "message": message}],
-            "upstream_status": upstream_status,
+            "upstream_status": upstream_status if upstream_status is not None else debug.get("status_code"),
             "upstream_body_preview": upstream_body_preview[:1000],
+            "upstream_debug": debug,
         },
     )
 
@@ -194,13 +209,13 @@ async def composition_generate_param_json_by_workflow(
         result = workflow_param_generation_service.generate(image_url, user_hint)
         return result.as_dict()
     except WorkflowConfigurationError as exc:
-        return workflow_error_response(503, "调用阿里云工作流失败：环境变量未配置", image_url=image_url, errors=[{"path": "env", "message": str(exc)}])
+        return workflow_error_response(503, "调用阿里云智能体应用失败：环境变量未配置", image_url=image_url, errors=[{"path": "env", "message": str(exc)}])
     except WorkflowRequestError as exc:
-        return workflow_error_response(502, "调用阿里云工作流失败", image_url=image_url, errors=[{"path": "workflow", "message": str(exc)}], upstream_status=exc.upstream_status, upstream_body_preview=exc.upstream_body_preview)
+        return workflow_error_response(502, "调用阿里云智能体应用失败", image_url=image_url, errors=[{"path": "application", "message": str(exc)}], upstream_status=exc.upstream_status, upstream_body_preview=exc.upstream_body_preview, upstream_debug=exc.upstream_debug)
     except WorkflowParseError as exc:
-        return workflow_error_response(502, str(exc), image_url=image_url, raw_workflow_response=exc.raw_workflow_response, raw_text=exc.raw_text, errors=exc.errors)
+        return workflow_error_response(502, str(exc), image_url=image_url, raw_workflow_response=exc.raw_workflow_response, raw_text=exc.raw_text, errors=exc.errors, upstream_debug=exc.upstream_debug)
     except Exception as exc:
-        return workflow_error_response(500, "工作流参数 JSON 生成服务异常", image_url=image_url, errors=[{"path": "server", "message": str(exc)}])
+        return workflow_error_response(500, "智能体应用参数 JSON 生成服务异常", image_url=image_url, errors=[{"path": "server", "message": str(exc)}])
 
 
 @app.post("/upload-image")
