@@ -182,19 +182,28 @@ def test_application_payload_contains_prompt_and_biz_params(monkeypatch):
 
     payload = captured["payload"]
     assert payload["input"]["prompt"] == "保留主体"
+    assert payload["input"]["image_list"] == ["https://public.example.com/static/uploads/workflow_inputs/a.png"]
     assert "biz_params" in payload["input"]
-    assert payload["input"]["biz_params"]["imageUrl"].startswith("https://public.example.com/")
-    assert payload["input"]["biz_params"]["imageList"] == [payload["input"]["biz_params"]["imageUrl"]]
-    assert "image_list" not in payload["input"]
+    assert payload["input"]["biz_params"]["pic-url"].startswith("https://public.example.com/")
+    assert payload["input"]["biz_params"]["source_width"] == 10
+    assert payload["input"]["biz_params"]["source_height"] == 20
     assert payload["parameters"]["incremental_output"] is False
     assert result.upstream_debug["prompt_present"] is True
     assert result.upstream_debug["biz_params_keys"]
     assert result.upstream_debug["image_input_debug"]["value_type"] == "URL"
     assert result.upstream_debug["token_usage"] == {"total_tokens": 12}
-    assert result.upstream_debug["actual_model_input_mode"] == "application_biz_params"
-    assert result.upstream_debug["image_part_included"] is False
-    assert result.upstream_debug["model_input_warning"] == "图片仅作为 biz_params 传入，可能不会进入模型 multimodal context。"
-    assert result.upstream_debug["model_input_preview"]["input"]["biz_params"]["imageUrl"] == "<image-url>"
+    assert result.upstream_debug["call_mode"] == "application"
+    assert result.upstream_debug["endpoint_url"] == "https://dashscope.example.com/apps/app-...7890/completion"
+    assert result.upstream_debug["app_id_masked"] == "app-...7890"
+    assert result.upstream_debug["actual_model_input_mode"] == "application_image_list"
+    assert result.upstream_debug["image_part_included"] is True
+    assert result.upstream_debug["image_list_present"] is True
+    assert result.upstream_debug["image_list_length"] == 1
+    assert result.upstream_debug["custom_image_url_variable_name"] == "pic-url"
+    assert result.upstream_debug["direct_model_bypassed"] is True
+    assert result.upstream_debug["application_model_controlled_by_app_config"] is True
+    assert result.upstream_debug["model_input_preview"]["input"]["biz_params"]["pic-url"] == "<image-url>"
+    assert "model" not in result.upstream_debug["model_input_preview"]
 
 
 def test_image_url_unreachable_blocks_application_call(monkeypatch):
@@ -360,21 +369,22 @@ def test_public_image_url_generation_is_absolute():
 
 
 def _set_direct_vl_env(monkeypatch):
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "direct_vl")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "key")
     monkeypatch.setenv("ALIYUN_DASHSCOPE_BASE_URL", "https://dashscope.example.com/compatible-mode/v1")
     monkeypatch.setenv("ALIYUN_VISION_MODEL", "qwen-vl-plus")
 
 
-def test_default_vision_call_mode_is_direct_vl(monkeypatch):
+def test_default_vision_call_mode_is_application(monkeypatch):
     monkeypatch.delenv("ALIYUN_VISION_CALL_MODE", raising=False)
 
-    assert _vision_call_mode() == "direct_vl"
-
-
-def test_application_mode_only_used_when_explicitly_configured(monkeypatch):
-    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "application")
-
     assert _vision_call_mode() == "application"
+
+
+def test_direct_vl_mode_only_used_when_explicitly_configured(monkeypatch):
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "direct_vl")
+
+    assert _vision_call_mode() == "direct_vl"
 
 def test_direct_vl_payload_contains_image_url_part(monkeypatch):
     import app.services.aliyun_workflow_param_generation_service as aliyun_service
@@ -398,6 +408,8 @@ def test_direct_vl_payload_contains_image_url_part(monkeypatch):
 
     content = captured["payload"]["messages"][0]["content"]
     assert content[0] == {"type": "image_url", "image_url": {"url": "https://public.example.com/a.png"}}
+    assert result.upstream_debug["call_mode"] == "direct_vl"
+    assert result.upstream_debug["warning"] == "当前绕过 AppID 智能体应用，直接调用模型 API；应用内 qwen3vl-plus 配置不会生效"
     assert result.upstream_debug["actual_model_input_mode"] == "direct_vl_messages"
     assert result.upstream_debug["image_part_included"] is True
     assert result.upstream_debug["image_part_field_name"] == "messages[].content[].image_url.url"
@@ -461,3 +473,128 @@ def test_direct_vl_output_json_still_passes_through_sanitizer(monkeypatch):
     assert len(result.document["elements"]) == 1
     assert result.dropped_elements[0]["index"] == 0
     assert result.upstream_debug["actual_model_input_mode"] == "direct_vl_messages"
+
+
+def test_default_call_workflow_uses_application_not_direct_vl(monkeypatch):
+    service = AliyunWorkflowParamGenerationService()
+    monkeypatch.delenv("ALIYUN_VISION_CALL_MODE", raising=False)
+    calls = {"application": 0, "direct_vl": 0}
+
+    def fake_application(image_url, user_hint=None, **kwargs):
+        calls["application"] += 1
+        return "application-result"
+
+    def fake_direct_vl(image_url, user_hint=None, **kwargs):
+        calls["direct_vl"] += 1
+        return "direct-result"
+
+    service.call_application = fake_application  # type: ignore[method-assign]
+    service.call_direct_vl = fake_direct_vl  # type: ignore[method-assign]
+
+    assert service.call_workflow("https://public.example.com/a.png") == "application-result"
+    assert calls == {"application": 1, "direct_vl": 0}
+
+
+def test_call_workflow_uses_direct_vl_only_when_explicit(monkeypatch):
+    service = AliyunWorkflowParamGenerationService()
+    monkeypatch.setenv("ALIYUN_VISION_CALL_MODE", "direct_vl")
+    calls = {"application": 0, "direct_vl": 0}
+
+    def fake_application(image_url, user_hint=None, **kwargs):
+        calls["application"] += 1
+        return "application-result"
+
+    def fake_direct_vl(image_url, user_hint=None, **kwargs):
+        calls["direct_vl"] += 1
+        return "direct-result"
+
+    service.call_application = fake_application  # type: ignore[method-assign]
+    service.call_direct_vl = fake_direct_vl  # type: ignore[method-assign]
+
+    assert service.call_workflow("https://public.example.com/a.png") == "direct-result"
+    assert calls == {"application": 0, "direct_vl": 1}
+
+
+def test_application_payload_respects_configurable_image_fields(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    monkeypatch.setenv("ALIYUN_APPLICATION_IMAGE_LIST_FIELD", "imageList")
+    monkeypatch.setenv("ALIYUN_APPLICATION_IMAGE_URL_VARIABLE", "image_url_custom")
+    monkeypatch.setenv("ALIYUN_APPLICATION_PASS_IMAGE_LIST", "true")
+    monkeypatch.setenv("ALIYUN_APPLICATION_PASS_BIZ_PARAMS", "true")
+    monkeypatch.setenv("ALIYUN_VISION_MODEL", "should-not-be-read")
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12},
+    )
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeJsonResponse({"output": {"text": json.dumps(_sample_json(), ensure_ascii=False)}})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.call_application("https://public.example.com/a.png", user_hint="提示", stream=False, image_debug={"image_size_bytes": 12})
+
+    payload = captured["payload"]
+    assert payload["input"]["prompt"] == "提示"
+    assert payload["input"]["imageList"] == ["https://public.example.com/a.png"]
+    assert payload["input"]["biz_params"]["image_url_custom"] == "https://public.example.com/a.png"
+    assert result.upstream_debug["input_keys"] == ["biz_params", "imageList", "prompt"]
+    assert result.upstream_debug["biz_params_keys"] == ["image_url_custom"]
+    assert result.upstream_debug["custom_image_url_variable_name"] == "image_url_custom"
+    assert "should-not-be-read" not in json.dumps(result.upstream_debug, ensure_ascii=False)
+
+
+def test_application_payload_can_disable_image_list_or_biz_params(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    monkeypatch.setenv("ALIYUN_APPLICATION_PASS_IMAGE_LIST", "false")
+    monkeypatch.setenv("ALIYUN_APPLICATION_PASS_BIZ_PARAMS", "false")
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12},
+    )
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeJsonResponse({"output": {"text": json.dumps(_sample_json(), ensure_ascii=False)}})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.call_application("https://public.example.com/a.png", user_hint="提示", stream=False, image_debug={"image_size_bytes": 12})
+
+    assert captured["payload"]["input"] == {"prompt": "提示"}
+    assert result.upstream_debug["image_list_present"] is False
+    assert result.upstream_debug["biz_params_keys"] == []
+
+
+def test_application_error_message_does_not_mention_qwen_vl(monkeypatch):
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    body = json.dumps({"request_id": "req-401", "message": "Incorrect API key"}).encode()
+
+    def raise_http_error(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            url="https://dashscope.example.com/apps/app-1234567890/completion",
+            code=401,
+            msg="Unauthorized",
+            hdrs={"X-Request-Id": "req-401"},
+            fp=type("Body", (), {"read": lambda self: body, "close": lambda self: None})(),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_http_error)
+
+    with pytest.raises(WorkflowRequestError) as exc_info:
+        service.call_application("https://public.example.com/a.png", stream=False, image_debug={"image_size_bytes": 1})
+
+    assert str(exc_info.value) == "调用阿里云智能体应用失败"
+    assert "Qwen-VL 模型失败" not in str(exc_info.value)
