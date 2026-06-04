@@ -52,6 +52,9 @@ def test_aliyun_app_chat_test_page_has_controls():
     assert 'id="jsonOutput"' in resp.text
     assert 'id="canvas"' in resp.text
     assert 'id="propertyPanel"' in resp.text
+    assert 'id="colorPanel"' in resp.text
+    assert "校验/渲染几何信息" in resp.text
+    assert "HSL 可调色" in resp.text
     assert "应用当前文本 JSON" in resp.text
     assert "textarea_json" in resp.text
 
