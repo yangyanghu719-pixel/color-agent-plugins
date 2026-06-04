@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import httpx
+import requests
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -497,6 +498,88 @@ def image_url_check_error_message(image_url_check: dict[str, Any]) -> str:
     return "图片 URL 不是公网可访问地址，阿里云应用无法读取图片"
 
 
+
+
+def strip_markdown_json_fence(text: str) -> str:
+    value = text.strip()
+    if not value.startswith("```"):
+        return value
+    lines = value.splitlines()
+    if lines and lines[0].strip().lower() in {"```", "```json"}:
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def preview_text(value: Any, limit: int = 500) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    return text[:limit]
+
+
+def parse_dashscope_sse_response(response: Any, *, started: float) -> StreamAggregationResult:
+    text_parts: list[str] = []
+    raw_events: list[Any] = []
+    data_previews: list[str] = []
+    chunk_count = 0
+    first_chunk_ms: int | None = None
+    request_id = response.headers.get("X-Request-Id") or response.headers.get("x-acs-request-id")
+    finish_reason: str | None = None
+    error_message: str | None = None
+    token_usage: Any | None = None
+
+    for raw_line in response.iter_lines(decode_unicode=True):
+        if raw_line is None:
+            continue
+        line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+        stripped = line.strip()
+        if not stripped or stripped.startswith("event:") or stripped.startswith("HTTP_STATUS"):
+            continue
+        if not stripped.startswith("data:"):
+            continue
+        data = stripped[5:].strip()
+        if not data or data.startswith("HTTP_STATUS") or data == "[DONE]":
+            continue
+        if first_chunk_ms is None:
+            first_chunk_ms = _elapsed_ms(started)
+        preview = preview_text(data, 500)
+        print(f"[workflow aliyun] data preview: {preview}", flush=True)
+        logger.info("[workflow aliyun] data preview: %s", preview)
+        data_previews.append(preview)
+        data_previews = data_previews[-20:]
+        chunk_count += 1
+        try:
+            event: Any = json.loads(data)
+        except json.JSONDecodeError:
+            event = data
+        raw_events.append(event)
+        text, event_debug = extract_text_from_event(event)
+        if text:
+            text_parts.append(text)
+        request_id = event_debug.get("request_id") or request_id
+        finish_reason = event_debug.get("finish_reason") or finish_reason
+        error_message = event_debug.get("error_message") or error_message
+        token_usage = event_debug.get("token_usage") or token_usage
+
+    debug = build_upstream_debug(
+        request_id=request_id,
+        status_code=response.status_code,
+        chunk_count=chunk_count,
+        first_chunk_ms=first_chunk_ms,
+        total_elapsed_ms=_elapsed_ms(started),
+        finish_reason=finish_reason,
+        error_message=error_message,
+        last_data_previews=data_previews,
+        token_usage=token_usage,
+    )
+    raw_text = "".join(text_parts).strip()
+    debug["raw_text_length"] = len(raw_text)
+    return StreamAggregationResult(raw_text, raw_events, debug)
+
+
 class AliyunVisionParamGenerationService:
     def _required_env(self, name: str) -> str:
         value = os.getenv(name, "").strip()
@@ -518,6 +601,98 @@ class AliyunVisionParamGenerationService:
         if not (base.startswith("http://") or base.startswith("https://")):
             raise WorkflowConfigurationError("PUBLIC_BASE_URL 必须以 http:// 或 https:// 开头")
         return f"{base}/{saved_relative_path.lstrip('/')}"
+
+
+    def generate_minimal_dashscope_app_json(self, image_url: str, user_hint: str | None = None) -> WorkflowGenerationResult:
+        api_key = self._env("ALIYUN_API_KEY")
+        app_id = self._env("ALIYUN_APPLICATION_ID")
+        if not api_key:
+            raise WorkflowConfigurationError("未配置环境变量 ALIYUN_API_KEY")
+        if not app_id:
+            raise WorkflowConfigurationError("未配置环境变量 ALIYUN_APPLICATION_ID")
+        prompt = (user_hint or "").strip() or "go"
+        url = f"https://dashscope.aliyuncs.com/api/v1/apps/{app_id}/completion"
+        body_dict = {"input": {"prompt": prompt, "image_list": [image_url]}, "parameters": {}}
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-SSE": "enable",
+        }
+        try:
+            timeout = float(self._env("ALIYUN_APPLICATION_READ_TIMEOUT_SECONDS", "ALIYUN_WORKFLOW_TIMEOUT_SECONDS", default="300"))
+        except ValueError:
+            timeout = 300.0
+        started = time.monotonic()
+        try:
+            response = requests.post(url, headers=headers, json=body_dict, stream=True, timeout=timeout)
+        except requests.RequestException as exc:
+            debug = build_upstream_debug(
+                status_code=None,
+                total_elapsed_ms=_elapsed_ms(started),
+                error_message=str(exc),
+                endpoint_url=url,
+                app_id_present=bool(app_id),
+                api_key_present=bool(api_key),
+            )
+            raise WorkflowRequestError("调用阿里云智能体应用失败", None, str(exc), upstream_debug=debug) from exc
+
+        if response.status_code != 200:
+            raw_preview = response.text[:1000]
+            debug = build_upstream_debug(
+                request_id=response.headers.get("X-Request-Id") or response.headers.get("x-acs-request-id"),
+                status_code=response.status_code,
+                total_elapsed_ms=_elapsed_ms(started),
+                error_message=_extract_error_message(raw_preview) or "调用阿里云智能体应用失败",
+                endpoint_url=url,
+                app_id_present=bool(app_id),
+                api_key_present=bool(api_key),
+            )
+            raise WorkflowRequestError("调用阿里云智能体应用失败", response.status_code, raw_preview, upstream_debug=debug)
+
+        aggregation = parse_dashscope_sse_response(response, started=started)
+        aggregation.upstream_debug.update({
+            "endpoint_url": url,
+            "app_id_present": bool(app_id),
+            "api_key_present": bool(api_key),
+            "public_image_url": image_url,
+            "prompt_length": len(prompt),
+            "request_body_preview": {"input": {"prompt": prompt, "image_list": ["<image-url>"]}, "parameters": {}},
+        })
+        raw_text = aggregation.raw_text.strip()
+        if not raw_text:
+            raise WorkflowParseError(
+                "Aliyun called successfully but no final text was parsed",
+                raw_workflow_response=aggregation.upstream_debug.get("last_data_previews", []),
+                raw_text="",
+                errors=[{"path": "output.text", "message": "未从 SSE data chunk 中解析到最终文本"}],
+                upstream_debug=aggregation.upstream_debug,
+            )
+        cleaned_text = strip_markdown_json_fence(raw_text)
+        try:
+            document = json.loads(cleaned_text)
+        except json.JSONDecodeError as exc:
+            debug = dict(aggregation.upstream_debug)
+            debug["error_message"] = str(exc)
+            raise WorkflowParseError(
+                "解析到 text 但不是合法 JSON",
+                raw_workflow_response=aggregation.raw_events,
+                raw_text=raw_text,
+                errors=[{"path": "raw_text", "message": f"JSON 解析失败: {exc}"}],
+                upstream_debug=debug,
+            ) from exc
+        textarea_json = json.dumps(document, ensure_ascii=False, indent=2)
+        return WorkflowGenerationResult(
+            "生成成功",
+            image_url,
+            aggregation.raw_events,
+            raw_text,
+            document,
+            textarea_json,
+            [],
+            [],
+            {"valid": True, "errors": []},
+            aggregation.upstream_debug,
+        )
 
     def call_workflow(
         self,

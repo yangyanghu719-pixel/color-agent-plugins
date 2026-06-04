@@ -186,8 +186,10 @@ def workflow_error_response(
             "valid": False,
             "message": message,
             "image_url": image_url,
+            "public_image_url": image_url,
             "raw_workflow_response": raw_workflow_response,
             "raw_text": raw_text,
+            "raw_text_preview": raw_text[:1000] if raw_text else upstream_body_preview[:1000],
             "document": None,
             "textarea_json": "",
             "warnings": [],
@@ -307,31 +309,30 @@ async def composition_generate_param_json_by_workflow(
         save_path.write_bytes(content)
     except OSError as exc:
         return workflow_error_response(500, "图片保存失败", errors=[{"path": "image", "message": str(exc)}])
-    relative_url_path = f"static/uploads/workflow_inputs/{save_name}"
+    public_image_url = f"https://composition-lab.onrender.com/static/uploads/workflow_inputs/{save_name}"
+    prompt = (user_hint or "").strip() or "go"
+    app_id_exists = bool(get_workflow_param_generation_service()._env("ALIYUN_APPLICATION_ID"))
+    api_key_exists = bool(get_workflow_param_generation_service()._env("ALIYUN_API_KEY"))
+    print(f"[workflow adapter] received filename: {image.filename}", flush=True)
+    print(f"[workflow adapter] saved local path: {save_path}", flush=True)
+    print(f"[workflow adapter] public_image_url: {public_image_url}", flush=True)
+    print(f"[workflow adapter] prompt: {prompt}", flush=True)
+    print(f"[workflow adapter] app_id_exists: {app_id_exists}; api_key_exists: {api_key_exists}", flush=True)
     try:
-        workflow_service = get_workflow_param_generation_service()
-        public_base_url = workflow_service._required_env("PUBLIC_BASE_URL")
-        image_url = workflow_service.public_image_url(public_base_url, relative_url_path)
+        result = get_workflow_param_generation_service().generate_minimal_dashscope_app_json(public_image_url, prompt)
+        body = result.as_dict()
+        body["public_image_url"] = public_image_url
+        body["raw_text_preview"] = result.raw_text[:1000]
+        body["image_url"] = public_image_url
+        return body
     except WorkflowConfigurationError as exc:
-        return workflow_error_response(500, "公网 URL 生成失败", errors=[{"path": "PUBLIC_BASE_URL", "message": str(exc)}])
-    try:
-        image_debug = await build_workflow_image_debug(
-            image_url=image_url,
-            public_base_url=public_base_url,
-            save_path=save_path,
-            content=content,
-            content_type=image.content_type,
-        )
-        result = get_workflow_param_generation_service().generate(image_url, user_hint, image_debug=image_debug)
-        return result.as_dict()
-    except WorkflowConfigurationError as exc:
-        return workflow_error_response(503, "调用阿里云智能体应用失败：环境变量未配置", image_url=image_url, errors=[{"path": "env", "message": str(exc)}])
+        return workflow_error_response(503, "调用阿里云智能体应用失败：环境变量未配置", image_url=public_image_url, errors=[{"path": "env", "message": str(exc)}])
     except WorkflowRequestError as exc:
-        return workflow_error_response(502, "调用阿里云智能体应用失败", image_url=image_url, errors=[{"path": "application", "message": str(exc)}], upstream_status=exc.upstream_status, upstream_body_preview=exc.upstream_body_preview, upstream_debug=exc.upstream_debug)
+        return workflow_error_response(502, "调用阿里云智能体应用失败", image_url=public_image_url, errors=[{"path": "application", "message": str(exc)}], upstream_status=exc.upstream_status, upstream_body_preview=exc.upstream_body_preview, upstream_debug=exc.upstream_debug)
     except WorkflowParseError as exc:
-        return workflow_error_response(502, str(exc), image_url=image_url, raw_workflow_response=exc.raw_workflow_response, raw_text=exc.raw_text, errors=exc.errors, upstream_debug=exc.upstream_debug)
+        return workflow_error_response(502, str(exc), image_url=public_image_url, raw_workflow_response=exc.raw_workflow_response, raw_text=exc.raw_text, errors=exc.errors, upstream_debug=exc.upstream_debug)
     except Exception as exc:
-        return workflow_error_response(500, "智能体应用参数 JSON 生成服务异常", image_url=image_url, errors=[{"path": "server", "message": str(exc)}])
+        return workflow_error_response(500, "智能体应用参数 JSON 生成服务异常", image_url=public_image_url, errors=[{"path": "server", "message": str(exc)}])
 
 
 @app.post("/upload-image")

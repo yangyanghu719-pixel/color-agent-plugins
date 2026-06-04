@@ -430,17 +430,28 @@ def test_workflow_generate_rejects_unsupported_file_type(tmp_path):
 
 def test_workflow_generate_parses_application_output_text(tmp_path, monkeypatch):
     from app.main import workflow_param_generation_service
+    from app.services.aliyun_workflow_param_generation_service import WorkflowGenerationResult
 
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://public.example.com")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "test-key")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "test-app")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
+    monkeypatch.setenv("ALIYUN_API_KEY", "test-key")
+    monkeypatch.setenv("ALIYUN_APPLICATION_ID", "test-app")
     payload = _sample_json()
-    monkeypatch.setattr(
-        workflow_param_generation_service,
-        "call_workflow",
-        lambda image_url, user_hint=None: {"output": {"text": f"```json\n{json.dumps(payload)}\n```"}},
-    )
+
+    def fake_generate(image_url, user_hint=None):
+        raw_text = f"```json\n{json.dumps(payload)}\n```"
+        return WorkflowGenerationResult(
+            "生成成功",
+            image_url,
+            [{"output": {"text": raw_text}}],
+            raw_text,
+            payload,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            [],
+            [],
+            {"valid": True, "errors": []},
+            {"status_code": 200},
+        )
+
+    monkeypatch.setattr(workflow_param_generation_service, "generate_minimal_dashscope_app_json", fake_generate)
     image_path = tmp_path / "reference.png"
     _create_test_image(image_path)
     with image_path.open("rb") as f:
@@ -455,14 +466,23 @@ def test_workflow_generate_parses_application_output_text(tmp_path, monkeypatch)
     assert body["document"]["version"] == _sample_json()["version"]
     assert body["document"]["elements"]
     assert body["textarea_json"].startswith("{\n")
-    assert body["image_url"].startswith("https://public.example.com/static/uploads/workflow_inputs/")
-
+    assert body["public_image_url"].startswith("https://composition-lab.onrender.com/static/uploads/workflow_inputs/")
+    assert body["raw_text_preview"].startswith("```json")
 
 def test_workflow_generate_reports_invalid_json(tmp_path, monkeypatch):
     from app.main import workflow_param_generation_service
+    from app.services.aliyun_workflow_param_generation_service import WorkflowParseError
 
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://public.example.com")
-    monkeypatch.setattr(workflow_param_generation_service, "call_workflow", lambda image_url, user_hint=None: {"output": {"text": "not json"}})
+    def fake_generate(image_url, user_hint=None):
+        raise WorkflowParseError(
+            "解析到 text 但不是合法 JSON",
+            raw_workflow_response=[{"output": {"text": "not json"}}],
+            raw_text="not json",
+            errors=[{"path": "raw_text", "message": "JSON 解析失败"}],
+            upstream_debug={"status_code": 200},
+        )
+
+    monkeypatch.setattr(workflow_param_generation_service, "generate_minimal_dashscope_app_json", fake_generate)
     image_path = tmp_path / "reference.png"
     _create_test_image(image_path)
     with image_path.open("rb") as f:
@@ -470,31 +490,34 @@ def test_workflow_generate_reports_invalid_json(tmp_path, monkeypatch):
     assert resp.status_code == 502
     body = resp.json()
     assert body["ok"] is False
-    assert body["message"] == "返回文本不是合法 JSON"
+    assert body["message"] == "解析到 text 但不是合法 JSON"
     assert body["raw_text"] == "not json"
+    assert body["raw_text_preview"] == "not json"
 
-
-def test_workflow_same_host_uses_local_file_check_and_absolute_url(tmp_path, monkeypatch):
+def test_workflow_uses_fixed_render_public_url(tmp_path, monkeypatch):
     from app.main import workflow_param_generation_service
-    import app.main as main_module
-
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://composition-lab.onrender.com")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "test-key")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "test-app")
-    monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
-
-    async def fail_async_http_check(image_url):
-        raise AssertionError("same-host URL must not trigger HTTP self-check")
+    from app.services.aliyun_workflow_param_generation_service import WorkflowGenerationResult
 
     captured = {}
 
-    def fake_call_workflow(image_url, user_hint=None, **kwargs):
+    def fake_generate(image_url, user_hint=None):
         captured["image_url"] = image_url
-        captured["image_debug"] = kwargs.get("image_debug")
-        return {"output": {"text": f"```json\n{json.dumps(_sample_json())}\n```"}}
+        payload = _sample_json()
+        raw_text = f"```json\n{json.dumps(payload)}\n```"
+        return WorkflowGenerationResult(
+            "生成成功",
+            image_url,
+            [{"output": {"text": raw_text}}],
+            raw_text,
+            payload,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            [],
+            [],
+            {"valid": True, "errors": []},
+            {"status_code": 200},
+        )
 
-    monkeypatch.setattr(main_module, "check_public_image_url_async", fail_async_http_check)
-    monkeypatch.setattr(workflow_param_generation_service, "call_workflow", fake_call_workflow)
+    monkeypatch.setattr(workflow_param_generation_service, "generate_minimal_dashscope_app_json", fake_generate)
     image_path = tmp_path / "reference.png"
     _create_test_image(image_path)
 
@@ -507,21 +530,13 @@ def test_workflow_same_host_uses_local_file_check_and_absolute_url(tmp_path, mon
 
     assert resp.status_code == 200
     body = resp.json()
-    image_debug = captured["image_debug"]
     assert captured["image_url"].startswith("https://composition-lab.onrender.com/static/uploads/workflow_inputs/")
     assert not captured["image_url"].startswith("/static/uploads/")
-    assert image_debug["public_image_url"] == captured["image_url"]
-    assert image_debug["image_url_host"] == "composition-lab.onrender.com"
-    assert image_debug["image_url_check_mode"] == "local_file_check"
-    assert image_debug["local_file_exists"] is True
-    assert image_debug["local_file_size_bytes"] > 0
-    assert image_debug["image_url_reachable"] == "skipped_same_host"
-    assert body["image_url"] == captured["image_url"]
+    assert body["public_image_url"] == captured["image_url"]
     static_path = urllib.parse.urlparse(captured["image_url"]).path
     static_resp = client.get(static_path)
     assert static_resp.status_code == 200
     assert static_resp.content
-
 
 def test_workflow_external_url_debug_uses_async_reachability_check(tmp_path, monkeypatch):
     import app.main as main_module
