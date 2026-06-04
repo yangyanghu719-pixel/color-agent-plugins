@@ -175,8 +175,14 @@ def build_payload_debug(
     }
     if image_debug:
         image_input_debug.update(image_debug)
+    model_input = inspect_model_input(body_dict, call_mode="application")
+    warning = None
+    if model_input["actual_model_input_mode"] == "application_biz_params":
+        warning = "图片仅作为 biz_params 传入，可能不会进入模型 multimodal context。"
     return {
         "endpoint_url": mask_app_id_in_url(endpoint_url, app_id),
+        **model_input,
+        "model_input_warning": warning,
         "input_top_level_keys": sorted(input_payload.keys()),
         "parameters_keys": sorted(parameters.keys()),
         "prompt_present": isinstance(prompt, str) and bool(prompt.strip()),
@@ -219,6 +225,97 @@ def merge_debug(base: dict[str, Any], extra: dict[str, Any] | None) -> dict[str,
     if extra:
         merged.update(extra)
     return merged
+
+
+def _sanitize_model_input_preview(payload: Any) -> Any:
+    if isinstance(payload, list):
+        return [_sanitize_model_input_preview(item) for item in payload]
+    if not isinstance(payload, dict):
+        return payload
+    sanitized: dict[str, Any] = {}
+    for key, value in payload.items():
+        normalized = key.lower()
+        if normalized in {"authorization", "api_key", "apikey"}:
+            sanitized[key] = "<redacted>"
+        elif normalized == "url" and isinstance(value, str) and value.startswith(("http://", "https://")):
+            sanitized[key] = value
+        elif normalized in {"imageurl", "image", "file", "query"} and isinstance(value, str):
+            sanitized[key] = "<image-url>"
+        else:
+            sanitized[key] = _sanitize_model_input_preview(value)
+    return sanitized
+
+
+def build_direct_vl_payload(prompt: str, image_url: str, model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    }
+
+
+def inspect_model_input(payload: dict[str, Any], *, call_mode: str) -> dict[str, Any]:
+    image_part_included = False
+    image_part_field_name: str | None = None
+    text_part_included = False
+    if call_mode == "direct_vl":
+        messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+        for message in messages:
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    part_type = part.get("type")
+                    if part_type == "image_url" and isinstance(part.get("image_url"), dict):
+                        image_part_included = True
+                        image_part_field_name = "messages[].content[].image_url.url"
+                    elif part_type == "image" and part.get("image"):
+                        image_part_included = True
+                        image_part_field_name = "messages[].content[].image"
+                    elif part_type == "text" and part.get("text"):
+                        text_part_included = True
+            elif isinstance(content, str) and content.strip():
+                text_part_included = True
+        actual_mode = "direct_vl_messages" if image_part_included else "text_only"
+    else:
+        input_payload = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+        biz_params = input_payload.get("biz_params") if isinstance(input_payload.get("biz_params"), dict) else {}
+        prompt = input_payload.get("prompt")
+        text_part_included = isinstance(prompt, str) and bool(prompt.strip())
+        if isinstance(input_payload.get("messages"), list):
+            for message in input_payload["messages"]:
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and ("image" in part or "image_url" in part):
+                            image_part_included = True
+                            image_part_field_name = "input.messages[].content[]"
+        actual_mode = "multimodal_parts" if image_part_included else "application_biz_params" if biz_params else "text_only"
+    return {
+        "actual_model_input_mode": actual_mode,
+        "image_part_included": image_part_included,
+        "image_part_field_name": image_part_field_name,
+        "text_part_included": text_part_included,
+        "model_input_preview": _sanitize_model_input_preview(payload),
+    }
+
+
+def _vision_call_mode() -> str:
+    mode = os.getenv("ALIYUN_VISION_CALL_MODE", "application").strip().lower()
+    if mode not in {"application", "direct_vl"}:
+        raise WorkflowConfigurationError("ALIYUN_VISION_CALL_MODE 仅支持 application 或 direct_vl")
+    return mode
+
+
+NO_IMAGE_PART_ERROR_MESSAGE = "模型实际输入中没有图片 part，视觉模型没有看到图片。"
 
 
 ALLOWED_PUBLIC_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -375,7 +472,7 @@ def image_url_check_error_message(image_url_check: dict[str, Any]) -> str:
     return "图片 URL 不是公网可访问地址，阿里云应用无法读取图片"
 
 
-class AliyunWorkflowParamGenerationService:
+class AliyunVisionParamGenerationService:
     def _required_env(self, name: str) -> str:
         value = os.getenv(name, "").strip()
         if not value:
@@ -404,7 +501,9 @@ class AliyunWorkflowParamGenerationService:
         *,
         image_debug: dict[str, Any] | None = None,
     ) -> StreamAggregationResult:
-        """Backward-compatible method name; now calls the Aliyun agent application API."""
+        """Backward-compatible route entry; dispatches to application or direct Qwen-VL mode."""
+        if _vision_call_mode() == "direct_vl":
+            return self.call_direct_vl(image_url, user_hint, image_debug=image_debug)
         try:
             return self.call_application(image_url, user_hint, stream=True, image_debug=image_debug, attempt_count=1)
         except WorkflowRequestError as stream_exc:
@@ -537,6 +636,104 @@ class AliyunWorkflowParamGenerationService:
             logger.exception("Aliyun application request failed")
             raise WorkflowRequestError("调用阿里云智能体应用失败", None, str(exc), upstream_debug=debug) from exc
 
+
+    def call_direct_vl(
+        self,
+        image_url: str,
+        user_hint: str | None = None,
+        *,
+        image_debug: dict[str, Any] | None = None,
+    ) -> StreamAggregationResult:
+        api_key = self._env("ALIYUN_DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY", "ALIYUN_APPLICATION_API_KEY", "ALIYUN_WORKFLOW_API_KEY")
+        if not api_key:
+            raise WorkflowConfigurationError("未配置环境变量 ALIYUN_DASHSCOPE_API_KEY/DASHSCOPE_API_KEY")
+        base_url = self._env("ALIYUN_DASHSCOPE_BASE_URL", default="https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
+        model = self._env("ALIYUN_VISION_MODEL", default="qwen-vl-plus")
+        default_prompt = self._env("ALIYUN_APPLICATION_DEFAULT_PROMPT", "ALIYUN_WORKFLOW_DEFAULT_PROMPT", default="请根据图片生成 CompositionParamDocument 参数 JSON。只输出 JSON。")
+        prompt = (user_hint or "").strip() or default_prompt
+        try:
+            read_timeout = float(self._env("ALIYUN_DASHSCOPE_TIMEOUT_SECONDS", "ALIYUN_WORKFLOW_TIMEOUT_SECONDS", default="300"))
+        except ValueError:
+            read_timeout = 300.0
+        url = f"{base_url}/chat/completions"
+        precomputed_image_url_check = extract_image_url_check_debug(image_debug)
+        if precomputed_image_url_check is not None:
+            image_url_check = {**precomputed_image_url_check, "application_call_attempted": False}
+        else:
+            image_url_check = {**check_public_image_url(image_url), "application_call_attempted": False}
+        body_dict = build_direct_vl_payload(prompt, image_url, model)
+        model_input = inspect_model_input(body_dict, call_mode="direct_vl")
+        payload_debug = {
+            "endpoint_url": url,
+            **model_input,
+            "model_input_warning": None,
+            "prompt_present": bool(prompt),
+            "prompt_length": len(prompt),
+            "biz_params_present": False,
+            "biz_params_keys": [],
+            "image_input_field_name": model_input.get("image_part_field_name"),
+            "image_url_present": bool(image_url),
+            "image_input_debug": {
+                "field_name": model_input.get("image_part_field_name"),
+                "value_type": classify_image_value(image_url),
+                "url_scheme": urllib.parse.urlparse(image_url).scheme,
+                "is_absolute_url": image_url.startswith(("http://", "https://")),
+                **(image_debug or {}),
+                **image_url_check,
+            },
+            "public_image_url": (image_debug or {}).get("public_image_url") or image_url,
+            "image_url_host": (image_debug or image_url_check).get("image_url_host") or urllib.parse.urlparse(image_url).netloc,
+            "image_url_check_mode": image_url_check.get("image_url_check_mode"),
+            "local_file_exists": image_url_check.get("local_file_exists"),
+            "local_file_size_bytes": image_url_check.get("local_file_size_bytes"),
+            "image_mime_type": (image_debug or {}).get("image_mime_type"),
+            "source_width": (image_debug or {}).get("source_width"),
+            "source_height": (image_debug or {}).get("source_height"),
+            "image_url_reachable": image_url_check.get("image_url_reachable"),
+            "image_url_status": image_url_check.get("image_url_status"),
+            "image_url_error": image_url_check.get("image_url_error"),
+            "image_url_check_warning": image_url_check.get("image_url_check_warning"),
+            "application_call_attempted": False,
+            "raw_text_length": 0,
+            "token_usage": None,
+            "attempt_count": 1,
+            "attempt_mode": "direct_vl_messages",
+        }
+        if not image_url_check_allows_application(image_url_check):
+            message = image_url_check_error_message(image_url_check)
+            raise WorkflowRequestError(message, None, "", upstream_debug=build_upstream_debug(error_message=message, **payload_debug))
+        if not model_input["image_part_included"]:
+            raise WorkflowRequestError(NO_IMAGE_PART_ERROR_MESSAGE, None, "", upstream_debug=build_upstream_debug(error_message=NO_IMAGE_PART_ERROR_MESSAGE, **payload_debug))
+        payload_debug["application_call_attempted"] = True
+        payload_debug["image_input_debug"]["application_call_attempted"] = True
+        logger.info("Aliyun direct Qwen-VL sanitized request payload: %s", json.dumps(payload_debug, ensure_ascii=False, default=str))
+        body = json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
+        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(request, timeout=read_timeout) as response:
+                status = getattr(response, "status", 200)
+                request_id = response.headers.get("X-Request-Id") or response.headers.get("x-acs-request-id")
+                raw_body = response.read().decode("utf-8", errors="replace")
+                if status < 200 or status >= 300:
+                    debug = build_upstream_debug(request_id=request_id, status_code=status, total_elapsed_ms=_elapsed_ms(started), error_message=_extract_error_message(raw_body) or "调用阿里云 Qwen-VL 模型失败", **payload_debug)
+                    raise WorkflowRequestError("调用阿里云 Qwen-VL 模型失败", status, raw_body, upstream_debug=debug)
+                debug = build_upstream_debug(request_id=request_id, status_code=status, chunk_count=1 if raw_body else 0, first_chunk_ms=_elapsed_ms(started) if raw_body else None, total_elapsed_ms=_elapsed_ms(started), **payload_debug)
+                return aggregate_non_stream_body(raw_body, debug)
+        except urllib.error.HTTPError as exc:
+            preview = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            request_id = getattr(exc, "headers", {}).get("X-Request-Id") or getattr(exc, "headers", {}).get("x-acs-request-id") or _extract_request_id(preview)
+            message = _extract_error_message(preview) or str(exc)
+            debug = build_upstream_debug(request_id=request_id, status_code=exc.code, total_elapsed_ms=_elapsed_ms(started), error_message=message, **payload_debug)
+            raise WorkflowRequestError("调用阿里云 Qwen-VL 模型失败", exc.code, preview, upstream_debug=debug) from exc
+        except WorkflowRequestError:
+            raise
+        except Exception as exc:
+            debug = build_upstream_debug(total_elapsed_ms=_elapsed_ms(started), error_message=str(exc), **payload_debug)
+            logger.exception("Aliyun direct Qwen-VL request failed")
+            raise WorkflowRequestError("调用阿里云 Qwen-VL 模型失败", None, str(exc), upstream_debug=debug) from exc
+
     def generate(self, image_url: str, user_hint: str | None = None, image_debug: dict[str, Any] | None = None) -> WorkflowGenerationResult:
         try:
             aggregation_result = self.call_workflow(image_url, user_hint, image_debug=image_debug)
@@ -550,6 +747,11 @@ class AliyunWorkflowParamGenerationService:
             # Keep old tests and any local monkeypatches working while the real path now uses streaming.
             raw_text = extract_workflow_text(aggregation_result)
             aggregation = StreamAggregationResult(raw_text, [aggregation_result], build_upstream_debug(chunk_count=1 if raw_text else 0))
+        debug_mode = aggregation.upstream_debug.get("actual_model_input_mode")
+        if aggregation.upstream_debug.get("image_part_included") is False and debug_mode in {"text_only"}:
+            debug = dict(aggregation.upstream_debug)
+            debug["error_message"] = NO_IMAGE_PART_ERROR_MESSAGE
+            raise WorkflowRequestError(NO_IMAGE_PART_ERROR_MESSAGE, None, "", upstream_debug=debug)
         raw_text = aggregation.raw_text.strip()
         if not raw_text:
             debug = dict(aggregation.upstream_debug)
@@ -806,3 +1008,7 @@ def extract_workflow_document(response_json: Any, raw_text: str | None = None, u
             upstream_debug=upstream_debug,
         )
     return sanitized
+
+
+# Backward-compatible service name used by the existing FastAPI route/tests.
+AliyunWorkflowParamGenerationService = AliyunVisionParamGenerationService
