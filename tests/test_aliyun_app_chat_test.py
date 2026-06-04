@@ -334,7 +334,7 @@ def test_operation_artifact_uses_reference_folder_structure(monkeypatch):
 def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
     monkeypatch.setenv("GITHUB_OPERATION_TOKEN", "token-test")
     monkeypatch.setenv("GITHUB_OPERATION_REPO", "owner/repo")
-    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab")
+    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab-data")
     calls = {}
 
     class FakeResponse:
@@ -359,8 +359,8 @@ def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
     result = main.github_put_file("backend_data_storage/上传照片_t1/当前任务汇总.json", b"{}", "save data")
 
     assert result["ok"] is True
-    assert calls["get"]["params"] == {"ref": "composition-lab"}
-    assert calls["put"]["json"]["branch"] == "composition-lab"
+    assert calls["get"]["params"] == {"ref": "composition-lab-data"}
+    assert calls["put"]["json"]["branch"] == "composition-lab-data"
     assert calls["put"]["json"]["content"] == "e30="
     assert calls["put"]["headers"]["Authorization"] == "Bearer token-test"
     assert "%E4%B8%8A%E4%BC%A0%E7%85%A7%E7%89%87_t1" in calls["put"]["url"]

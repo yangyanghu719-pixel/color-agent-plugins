@@ -69,7 +69,7 @@ MAX_AB_COMPOSITION_IMAGE_BYTES = 7 * 1024 * 1024
 DATA_URL_PATTERN = re.compile(r"^data:(image/(?:png|jpeg|jpg|webp));base64,(.+)$", re.IGNORECASE | re.DOTALL)
 GITHUB_CONTENTS_API = "https://api.github.com/repos/{repo}/contents/{path}"
 DEFAULT_OPERATION_GITHUB_REPO = "yangyanghu719-pixel/color-agent-plugins"
-DEFAULT_OPERATION_GITHUB_BRANCH = "composition-lab"
+DEFAULT_OPERATION_GITHUB_BRANCH = "composition-lab-data"
 DEFAULT_OPERATION_GITHUB_BASE_DIR = "backend_data_storage"
 
 
