@@ -4,6 +4,7 @@ import json
 from fastapi.testclient import TestClient
 
 from app.main import app
+import app.main as main
 
 client = TestClient(app)
 
@@ -286,3 +287,131 @@ def test_aliyun_app_chat_test_analyze_ab_color_uses_color_teacher_prompt(monkeyp
     assert "色彩关系" in color_prompt
     assert "构图而不是" not in color_prompt
     assert body["request_debug"]["analysis_type"] == "color"
+
+
+def test_aliyun_app_chat_test_page_has_operation_log_controls():
+    resp = client.get("/aliyun-app-chat-test")
+
+    assert resp.status_code == 200
+    assert "操作数据收集" in resp.text
+    assert 'id="downloadOperationCsvBtn"' in resp.text
+    assert "/aliyun-app-chat-test/operation-log" in resp.text
+    assert "/aliyun-app-chat-test/operation-log.csv" in resp.text
+    assert "backend_data_storage" in resp.text
+    assert "task_id" in resp.text
+
+
+def test_aliyun_app_chat_test_operation_log_records_csv_row():
+    task_id = "pytest-task-001"
+
+    resp = client.post(
+        "/aliyun-app-chat-test/operation-log",
+        json={"task_id": task_id, "event_type": "button_click", "event_label": "生成 JSON"},
+    )
+    csv_resp = client.get("/aliyun-app-chat-test/operation-log.csv")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "task_id": task_id}
+    assert csv_resp.status_code == 200
+    assert "text/csv" in csv_resp.headers["content-type"]
+    csv_text = csv_resp.content.decode("utf-8-sig")
+    assert "task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image" in csv_text
+    assert task_id in csv_text
+    assert "button_click" in csv_text
+    assert "生成 JSON" in csv_text
+
+
+def test_operation_artifact_uses_reference_folder_structure(monkeypatch):
+    monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
+
+    result = main.write_operation_text_artifact("pytest-folder-001", "任务1_构图比较/构图对比分析文本.txt", "分析文本", "test commit")
+
+    assert "上传照片_pytest-folder-001" in result["local_path"]
+    assert result["repo_path"] == "backend_data_storage/上传照片_pytest-folder-001/任务1_构图比较/构图对比分析文本.txt"
+    assert result["github"]["enabled"] is False
+
+
+def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
+    monkeypatch.setenv("GITHUB_OPERATION_TOKEN", "token-test")
+    monkeypatch.setenv("GITHUB_OPERATION_REPO", "owner/repo")
+    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab-data")
+    calls = {"gets": []}
+
+    class FakeResponse:
+        def __init__(self, status_code, text="{}", payload=None):
+            self.status_code = status_code
+            self.text = text
+            self._payload = payload or {"sha": "sha-existing", "object": {"sha": "branch-sha"}}
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, headers, params=None, timeout=20):
+        calls["gets"].append({"url": url, "headers": headers, "params": params, "timeout": timeout})
+        if "/git/ref/heads/composition-lab-data" in url:
+            return FakeResponse(200, payload={"object": {"sha": "branch-sha"}})
+        return FakeResponse(404)
+
+    def fake_put(url, headers, json, timeout):
+        calls["put"] = {"url": url, "headers": headers, "json": json, "timeout": timeout}
+        return FakeResponse(201, '{"content": {}}')
+
+    monkeypatch.setattr(main.requests, "get", fake_get)
+    monkeypatch.setattr(main.requests, "put", fake_put)
+
+    result = main.github_put_file("backend_data_storage/上传照片_t1/当前任务汇总.json", b"{}", "save data")
+
+    assert result["ok"] is True
+    assert result["branch_result"] == {"ok": True, "created": False, "branch": "composition-lab-data"}
+    assert calls["gets"][-1]["params"] == {"ref": "composition-lab-data"}
+    assert calls["put"]["json"]["branch"] == "composition-lab-data"
+    assert calls["put"]["json"]["content"] == "e30="
+    assert calls["put"]["headers"]["Authorization"] == "Bearer token-test"
+    assert "%E4%B8%8A%E4%BC%A0%E7%85%A7%E7%89%87_t1" in calls["put"]["url"]
+
+
+def test_github_put_file_creates_missing_data_branch(monkeypatch):
+    monkeypatch.setenv("GITHUB_OPERATION_TOKEN", "token-test")
+    monkeypatch.setenv("GITHUB_OPERATION_REPO", "owner/repo")
+    monkeypatch.setenv("GITHUB_OPERATION_BRANCH", "composition-lab-data")
+    calls = {"gets": []}
+
+    class FakeResponse:
+        def __init__(self, status_code, text="{}", payload=None):
+            self.status_code = status_code
+            self.text = text
+            self._payload = payload or {}
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, headers, params=None, timeout=20):
+        calls["gets"].append(url)
+        if "/git/ref/heads/composition-lab-data" in url:
+            return FakeResponse(404)
+        if url == "https://api.github.com/repos/owner/repo":
+            return FakeResponse(200, payload={"default_branch": "composition-lab"})
+        if "/git/ref/heads/composition-lab" in url:
+            return FakeResponse(200, payload={"object": {"sha": "source-sha"}})
+        if "/contents/" in url:
+            return FakeResponse(404)
+        return FakeResponse(404)
+
+    def fake_post(url, headers, json, timeout):
+        calls["post"] = {"url": url, "headers": headers, "json": json, "timeout": timeout}
+        return FakeResponse(201, '{"ref": "refs/heads/composition-lab-data"}')
+
+    def fake_put(url, headers, json, timeout):
+        calls["put"] = {"url": url, "headers": headers, "json": json, "timeout": timeout}
+        return FakeResponse(201, '{"content": {}}')
+
+    monkeypatch.setattr(main.requests, "get", fake_get)
+    monkeypatch.setattr(main.requests, "post", fake_post)
+    monkeypatch.setattr(main.requests, "put", fake_put)
+
+    result = main.github_put_file("backend_data_storage/上传照片_t1/当前任务汇总.json", b"{}", "save data")
+
+    assert result["ok"] is True
+    assert result["branch_result"]["created"] is True
+    assert calls["post"]["json"] == {"ref": "refs/heads/composition-lab-data", "sha": "source-sha"}
+    assert calls["put"]["json"]["branch"] == "composition-lab-data"
