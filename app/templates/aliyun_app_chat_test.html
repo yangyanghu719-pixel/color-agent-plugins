@@ -61,7 +61,7 @@
 
     main {
       display: grid;
-      grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr) minmax(320px, 390px);
+      grid-template-columns: minmax(280px, 340px) minmax(560px, 1fr) minmax(320px, 390px);
       gap: clamp(14px, 2vw, 24px);
       align-items: start;
     }
@@ -174,26 +174,50 @@
       font-size: 0.9rem;
     }
 
+    .result { padding: 16px; }
+
     #jsonOutput {
-      min-height: clamp(340px, 48vh, 620px);
+      min-height: clamp(220px, 30vh, 360px);
+      max-height: 42vh;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: clamp(13px, 0.28vw + 12px, 15px);
-      line-height: 1.62;
+      font-size: clamp(12px, 0.22vw + 11px, 14px);
+      line-height: 1.58;
       white-space: pre;
     }
 
+    .canvas-card,
+    .inspector-card {
+      min-height: min(78vh, 860px);
+      max-height: min(78vh, 860px);
+      display: flex;
+      flex-direction: column;
+    }
     .canvas-card { overflow: hidden; }
     .canvas-meta, .meta { color: #374151; font-size: 0.88rem; }
-    .canvas-wrap { display: flex; justify-content: center; margin-top: 12px; }
+    .canvas-wrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-top: 12px;
+    }
     #canvas {
       width: 100%;
-      max-height: min(70vh, 820px);
+      height: 100%;
+      max-height: 100%;
       border: 1px solid #d1d5db;
       border-radius: 18px;
       background: #fff;
       touch-action: none;
     }
     #selectionOverlay { pointer-events: none; }
+
+    .inspector-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding-right: 4px;
+    }
 
     .section { margin-top: 16px; }
     .section h3 { font-size: 1rem; margin-bottom: 8px; }
@@ -283,15 +307,23 @@
       background: #f8fafc;
     }
 
-    @media (max-width: 1180px) {
-      main { grid-template-columns: 1fr 1fr; }
-      .side-panel { grid-column: 1 / -1; }
+    @media (max-width: 1280px) {
+      main { grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr); }
+      .inspector-card { grid-column: 1 / -1; }
+      .canvas-card,
+      .inspector-card {
+        min-height: auto;
+        max-height: none;
+      }
+      .canvas-wrap { min-height: 520px; }
+      #canvas { height: auto; max-height: min(70vh, 760px); }
     }
 
     @media (max-width: 820px) {
       .page { width: min(100% - 24px, 680px); padding: 24px 0; }
       main { grid-template-columns: 1fr; }
-      #jsonOutput { min-height: 48vh; }
+      #jsonOutput { min-height: 48vh; max-height: none; }
+      .canvas-wrap { min-height: 0; }
       .ab-slots { grid-template-columns: 1fr; }
       .ab-thumb { height: clamp(140px, 48vw, 220px); }
     }
@@ -326,39 +358,39 @@
           <div id="imageMeta" class="meta">未选择图片。</div>
         </section>
 
-      </div>
-
-      <section class="card result" aria-labelledby="resultTitle">
-        <div class="result-head">
-          <h2 class="result-title" id="resultTitle">textarea_json</h2>
-          <button id="copyBtn" type="button">复制</button>
-        </div>
-        <div class="status" id="status" aria-live="polite">等待上传图片。</div>
-        <textarea id="jsonOutput" placeholder="生成后的 textarea_json 会显示在这里；也可以手动修改后点击“应用当前文本 JSON”。"></textarea>
-        <div class="actions">
-          <button id="applyJsonBtn" type="button">应用当前文本 JSON</button>
-          <button id="clearCanvasBtn" type="button">清空画布</button>
-        </div>
-      </section>
-
-      <aside class="stack side-panel">
-        <section class="card canvas-card">
-          <div class="panel-head">
-            <h2>图元画布</h2>
-            <span class="meta">当前元素数量: <strong id="count">0</strong></span>
+        <section class="card result" aria-labelledby="resultTitle">
+          <div class="result-head">
+            <h2 class="result-title" id="resultTitle">textarea_json</h2>
+            <button id="copyBtn" type="button">复制</button>
           </div>
-          <div class="canvas-meta" id="canvasMeta">canvas: 800x800, background: #FFFFFF</div>
-          <div class="canvas-wrap">
-            <svg id="canvas" viewBox="0 0 1000 1000" aria-label="图元交互画布">
-              <g id="scene"></g>
-              <g id="selectionOverlay"></g>
-            </svg>
+          <div class="status" id="status" aria-live="polite">等待上传图片。</div>
+          <textarea id="jsonOutput" placeholder="生成后的 textarea_json 会显示在这里；也可以手动修改后点击“应用当前文本 JSON”。"></textarea>
+          <div class="actions">
+            <button id="applyJsonBtn" type="button">应用当前文本 JSON</button>
+            <button id="clearCanvasBtn" type="button">清空画布</button>
           </div>
-          <p class="hint">点击图元可选中；拖拽图元可移动；拖拽角点可缩放；拖拽上方圆点可旋转。</p>
         </section>
 
-        <section class="card">
-          <h2>校验/渲染信息</h2>
+      </div>
+
+      <section class="card canvas-card">
+        <div class="panel-head">
+          <h2>图元画布</h2>
+          <span class="meta">当前元素数量: <strong id="count">0</strong></span>
+        </div>
+        <div class="canvas-meta" id="canvasMeta">canvas: 800x800, background: #FFFFFF</div>
+        <div class="canvas-wrap">
+          <svg id="canvas" viewBox="0 0 1000 1000" aria-label="图元交互画布">
+            <g id="scene"></g>
+            <g id="selectionOverlay"></g>
+          </svg>
+        </div>
+        <p class="hint">点击图元可选中；拖拽图元可移动；拖拽角点可缩放；拖拽上方圆点可旋转。</p>
+      </section>
+
+      <aside class="card inspector-card">
+        <h2>校验/渲染信息</h2>
+        <div class="inspector-scroll">
           <div id="success" class="ok"></div>
           <div id="errors" class="err"></div>
 
@@ -396,7 +428,7 @@
             <div id="selectionInfo" class="meta">未选中对象</div>
             <div id="propertyPanel"></div>
           </div>
-        </section>
+        </div>
       </aside>
 
       <section class="card ab-panel" aria-labelledby="abCompareTitle">
