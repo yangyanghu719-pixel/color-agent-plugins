@@ -1,9 +1,9 @@
 {
   "task_id": "task-1780617244429-63c378",
   "created_at": "2026-06-04T23:54:04+00:00",
-  "updated_at": "2026-06-04T23:54:12+00:00",
-  "prompt": "",
-  "manual_uploaded_image": "",
+  "updated_at": "2026-06-04T23:54:17+00:00",
+  "prompt": "go",
+  "manual_uploaded_image": "https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png",
   "ai_raw_image": "",
   "composition_image_a": "",
   "composition_image_b": "",
@@ -11,6 +11,6 @@
   "color_image_a": "",
   "color_image_b": "",
   "color_analysis_result": "",
-  "last_event_type": "image_selected",
-  "last_event_label": "屏幕截图 2026-04-10 182624.png"
+  "last_event_type": "manual_upload",
+  "last_event_label": "手动上传图片"
 }
