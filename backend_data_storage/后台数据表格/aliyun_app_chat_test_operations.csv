@@ -1,5 +1,5 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
-task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:58:56+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,"{
+task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:59:09+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-abf6986dbe834bacaea43e3affe710a0.png,"{
   ""version"": ""1.0"",
   ""canvas"": {
     ""width"": 1000,
@@ -276,4 +276,4 @@ task-1780617244429-63c378,2026-06-04T23:54:04+00:00,2026-06-04T23:58:56+00:00,go
     *   **优先调整：** 利用**形状的大小对比**。
     *   **具体操作：** 在图 A 的基础上，将右侧的一朵云**显著放大**，使其占据天空的主要位置，其他云朵缩小作为陪衬。同时，将地面的黄色小花集中在画面中心偏下的位置，形成一个倒三角形的视觉引导区，让视线从天空的大云，汇聚到地面的小花上。
 
-希望这些分析能帮助你更好地理解构图对画面情绪的影响！如果有具体的修改草图，欢迎继续讨论。",https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-a-b399db1ed3b34a359b005adeef7c5e3c.png,,,button_click,保存中…
+希望这些分析能帮助你更好地理解构图对画面情绪的影响！如果有具体的修改草图，欢迎继续讨论。",https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-a-b399db1ed3b34a359b005adeef7c5e3c.png,https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-b-d64e4c145f4b4802ae3ca7d6bd5822af.png,,save_comparison_image,保存color图 B
