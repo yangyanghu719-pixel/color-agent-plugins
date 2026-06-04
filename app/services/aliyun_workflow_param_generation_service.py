@@ -6,6 +6,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
@@ -102,8 +103,9 @@ def build_upstream_debug(
     total_elapsed_ms: int | None = None,
     finish_reason: str | None = None,
     error_message: str | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
-    return {
+    debug = {
         "request_id": request_id,
         "status_code": status_code,
         "chunk_count": chunk_count,
@@ -112,6 +114,129 @@ def build_upstream_debug(
         "finish_reason": finish_reason,
         "error_message": error_message,
     }
+    debug.update(extra)
+    return debug
+
+
+def _env_enabled(value: str, *, default: bool = False) -> bool:
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"1", "true", "yes", "on"}
+
+
+def mask_app_id(app_id: str) -> str:
+    if len(app_id) <= 8:
+        return "****" if app_id else ""
+    return f"{app_id[:4]}...{app_id[-4:]}"
+
+
+def mask_app_id_in_url(url: str, app_id: str) -> str:
+    return url.replace(app_id, mask_app_id(app_id)) if app_id else url
+
+
+def classify_image_value(value: str) -> str:
+    if value.startswith("http://") or value.startswith("https://"):
+        return "URL"
+    if value.startswith("data:image/"):
+        return "base64"
+    if value.startswith("file-"):
+        return "file_id"
+    if value.startswith("session-file-"):
+        return "session_file_id"
+    if value.startswith("/") or value.startswith("static/") or value.startswith("./") or value.startswith("../"):
+        return "local_path"
+    return "unknown"
+
+
+def build_payload_debug(
+    *,
+    endpoint_url: str,
+    app_id: str,
+    body_dict: dict[str, Any],
+    image_field_name: str,
+    image_url: str,
+    image_debug: dict[str, Any] | None = None,
+    attempt_count: int = 1,
+    attempt_mode: str = "stream",
+) -> dict[str, Any]:
+    input_payload = body_dict.get("input") if isinstance(body_dict.get("input"), dict) else {}
+    parameters = body_dict.get("parameters") if isinstance(body_dict.get("parameters"), dict) else {}
+    biz_params = input_payload.get("biz_params") if isinstance(input_payload.get("biz_params"), dict) else {}
+    prompt = input_payload.get("prompt")
+    image_input_debug = {
+        "field_name": image_field_name,
+        "value_type": classify_image_value(image_url),
+        "url_scheme": urllib.parse.urlparse(image_url).scheme,
+        "is_absolute_url": image_url.startswith(("http://", "https://")),
+    }
+    if image_debug:
+        image_input_debug.update(image_debug)
+    return {
+        "endpoint_url": mask_app_id_in_url(endpoint_url, app_id),
+        "input_top_level_keys": sorted(input_payload.keys()),
+        "parameters_keys": sorted(parameters.keys()),
+        "prompt_present": isinstance(prompt, str) and bool(prompt.strip()),
+        "prompt_length": len(prompt) if isinstance(prompt, str) else 0,
+        "biz_params_present": isinstance(input_payload.get("biz_params"), dict),
+        "biz_params_keys": sorted(biz_params.keys()),
+        "image_input_field_name": image_field_name,
+        "image_url_present": bool(image_url),
+        "image_input_debug": image_input_debug,
+        "image_url_reachable": image_input_debug.get("image_url_reachable"),
+        "image_url_status": image_input_debug.get("image_url_status"),
+        "raw_text_length": 0,
+        "token_usage": None,
+        "sanitized_request_payload": {
+            "input": {
+                "prompt": "<present>" if isinstance(prompt, str) and prompt else "",
+                "biz_params": {key: ("<image-url>" if key in {"imageUrl", "image", "file", "query"} else ["<image-url>"] if key == "imageList" else value) for key, value in biz_params.items()},
+            },
+            "parameters": parameters,
+            "debug": body_dict.get("debug", {}),
+        },
+        "attempt_count": attempt_count,
+        "attempt_mode": attempt_mode,
+    }
+
+
+def merge_debug(base: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(base)
+    if extra:
+        merged.update(extra)
+    return merged
+
+
+def check_public_image_url(image_url: str, *, timeout: float = 10.0) -> dict[str, Any]:
+    debug = {
+        "image_url_reachable": False,
+        "image_url_status": None,
+        "image_url_content_type": None,
+        "image_url_content_length": None,
+        "image_url_error": None,
+    }
+    if not image_url.startswith(("http://", "https://")):
+        debug["image_url_error"] = "image_url is not an absolute HTTP(S) URL"
+        return debug
+    request = urllib.request.Request(image_url, method="GET", headers={"Range": "bytes=0-0", "User-Agent": "composition-lab-url-check/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", 200)
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            content_length_raw = response.headers.get("Content-Length")
+            content_length = int(content_length_raw) if content_length_raw and content_length_raw.isdigit() else None
+            sample = response.read(1)
+            debug.update({
+                "image_url_status": status,
+                "image_url_content_type": content_type,
+                "image_url_content_length": content_length,
+                "image_url_reachable": 200 <= status < 300 and content_type in {"image/png", "image/jpeg", "image/webp"} and (content_length is None or content_length > 0) and bool(sample),
+            })
+    except urllib.error.HTTPError as exc:
+        debug.update({"image_url_status": exc.code, "image_url_error": str(exc)})
+    except Exception as exc:
+        debug["image_url_error"] = str(exc)
+    return debug
 
 
 class AliyunWorkflowParamGenerationService:
@@ -136,16 +261,30 @@ class AliyunWorkflowParamGenerationService:
             raise WorkflowConfigurationError("PUBLIC_BASE_URL 必须以 http:// 或 https:// 开头")
         return f"{base}/{saved_relative_path.lstrip('/')}"
 
-    def call_workflow(self, image_url: str, user_hint: str | None = None) -> StreamAggregationResult:
+    def call_workflow(
+        self,
+        image_url: str,
+        user_hint: str | None = None,
+        *,
+        image_debug: dict[str, Any] | None = None,
+    ) -> StreamAggregationResult:
         """Backward-compatible method name; now calls the Aliyun agent application API."""
         try:
-            return self.call_application(image_url, user_hint, stream=True)
+            return self.call_application(image_url, user_hint, stream=True, image_debug=image_debug, attempt_count=1)
         except WorkflowRequestError as stream_exc:
-            if os.getenv("ALIYUN_APPLICATION_DISABLE_NON_STREAM_FALLBACK", "").lower() in {"1", "true", "yes"}:
+            fallback_enabled = _env_enabled(os.getenv("ALIYUN_APPLICATION_ENABLE_FALLBACK", ""), default=False)
+            if not fallback_enabled:
                 raise
             logger.warning("Aliyun application streaming call failed; retrying once without streaming: %s", stream_exc)
             try:
-                return self.call_application(image_url, user_hint, stream=False, prior_debug=stream_exc.upstream_debug)
+                return self.call_application(
+                    image_url,
+                    user_hint,
+                    stream=False,
+                    prior_debug=stream_exc.upstream_debug,
+                    image_debug=image_debug,
+                    attempt_count=2,
+                )
             except WorkflowRequestError:
                 raise
 
@@ -156,6 +295,9 @@ class AliyunWorkflowParamGenerationService:
         *,
         stream: bool = True,
         prior_debug: dict[str, Any] | None = None,
+        image_debug: dict[str, Any] | None = None,
+        attempt_count: int = 1,
+        skip_image_check: bool = False,
     ) -> StreamAggregationResult:
         api_key = self._env("ALIYUN_APPLICATION_API_KEY", "ALIYUN_WORKFLOW_API_KEY")
         app_id = self._env("ALIYUN_APPLICATION_APP_ID", "ALIYUN_WORKFLOW_APP_ID")
@@ -173,11 +315,40 @@ class AliyunWorkflowParamGenerationService:
         except ValueError:
             read_timeout = 300.0
         url = f"{base_url}/{app_id}/completion"
-        body_dict = {
-            "input": {"prompt": prompt, "image_list": [image_url]},
-            "parameters": {"incremental_output": stream},
-            "stream": stream,
+        skip_image_check = skip_image_check or image_debug is None
+        image_url_check = {"image_url_reachable": None, "image_url_status": None} if skip_image_check else check_public_image_url(image_url)
+        image_field_name = self._env("ALIYUN_APPLICATION_IMAGE_FIELD", default="imageUrl")
+        biz_params = {
+            "source_width": (image_debug or {}).get("source_width"),
+            "source_height": (image_debug or {}).get("source_height"),
         }
+        if image_url:
+            biz_params.update({"imageUrl": image_url, "imageList": [image_url]})
+            if image_field_name not in biz_params:
+                biz_params[image_field_name] = image_url
+        biz_params = {key: value for key, value in biz_params.items() if value is not None}
+        body_dict = {
+            "input": {"prompt": prompt, "biz_params": biz_params},
+            "parameters": {"incremental_output": stream},
+            "debug": {},
+        }
+        payload_debug = build_payload_debug(
+            endpoint_url=url,
+            app_id=app_id,
+            body_dict=body_dict,
+            image_field_name=image_field_name,
+            image_url=image_url,
+            image_debug={**(image_debug or {}), **image_url_check},
+            attempt_count=attempt_count,
+            attempt_mode="stream" if stream else "non_stream",
+        )
+        logger.info("Aliyun application sanitized request payload: %s", json.dumps(payload_debug, ensure_ascii=False, default=str))
+        if not skip_image_check and not image_url_check.get("image_url_reachable"):
+            debug = build_upstream_debug(
+                error_message="图片 URL 不是公网可访问地址，阿里云应用无法读取图片",
+                **payload_debug,
+            )
+            raise WorkflowRequestError("图片 URL 不是公网可访问地址，阿里云应用无法读取图片", None, "", upstream_debug=debug)
         body = json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -194,18 +365,20 @@ class AliyunWorkflowParamGenerationService:
                 request_id = response.headers.get("X-Request-Id") or response.headers.get("x-acs-request-id")
                 if status < 200 or status >= 300:
                     raw_body = response.read().decode("utf-8", errors="replace")
-                    debug = build_upstream_debug(request_id=request_id, status_code=status, total_elapsed_ms=_elapsed_ms(started), error_message=_extract_error_message(raw_body) or "调用阿里云智能体应用失败")
+                    debug = build_upstream_debug(request_id=request_id, status_code=status, total_elapsed_ms=_elapsed_ms(started), error_message=_extract_error_message(raw_body) or "调用阿里云智能体应用失败", **payload_debug)
                     raise WorkflowRequestError("调用阿里云智能体应用失败", status, raw_body, upstream_debug=debug)
                 if stream:
-                    return aggregate_application_stream(response, started=started, status_code=status, request_id=request_id)
+                    aggregation = aggregate_application_stream(response, started=started, status_code=status, request_id=request_id)
+                    aggregation.upstream_debug = merge_debug(payload_debug, aggregation.upstream_debug)
+                    return aggregation
                 raw_body = response.read().decode("utf-8", errors="replace")
-                debug = build_upstream_debug(request_id=request_id, status_code=status, chunk_count=1 if raw_body else 0, first_chunk_ms=_elapsed_ms(started) if raw_body else None, total_elapsed_ms=_elapsed_ms(started))
+                debug = build_upstream_debug(request_id=request_id, status_code=status, chunk_count=1 if raw_body else 0, first_chunk_ms=_elapsed_ms(started) if raw_body else None, total_elapsed_ms=_elapsed_ms(started), **payload_debug)
                 return aggregate_non_stream_body(raw_body, debug)
         except urllib.error.HTTPError as exc:
             preview = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
             request_id = getattr(exc, "headers", {}).get("X-Request-Id") or getattr(exc, "headers", {}).get("x-acs-request-id") or _extract_request_id(preview)
             message = _extract_error_message(preview) or str(exc)
-            debug = build_upstream_debug(request_id=request_id, status_code=exc.code, total_elapsed_ms=_elapsed_ms(started), error_message=message)
+            debug = build_upstream_debug(request_id=request_id, status_code=exc.code, total_elapsed_ms=_elapsed_ms(started), error_message=message, **payload_debug)
             if prior_debug:
                 debug["stream_retry_debug"] = prior_debug
             logger.warning("Aliyun application HTTP error status=%s request_id=%s message=%s", exc.code, request_id, message)
@@ -213,14 +386,19 @@ class AliyunWorkflowParamGenerationService:
         except WorkflowRequestError:
             raise
         except Exception as exc:
-            debug = build_upstream_debug(total_elapsed_ms=_elapsed_ms(started), error_message=str(exc))
+            debug = build_upstream_debug(total_elapsed_ms=_elapsed_ms(started), error_message=str(exc), **payload_debug)
             if prior_debug:
                 debug["stream_retry_debug"] = prior_debug
             logger.exception("Aliyun application request failed")
             raise WorkflowRequestError("调用阿里云智能体应用失败", None, str(exc), upstream_debug=debug) from exc
 
-    def generate(self, image_url: str, user_hint: str | None = None) -> WorkflowGenerationResult:
-        aggregation_result = self.call_workflow(image_url, user_hint)
+    def generate(self, image_url: str, user_hint: str | None = None, image_debug: dict[str, Any] | None = None) -> WorkflowGenerationResult:
+        try:
+            aggregation_result = self.call_workflow(image_url, user_hint, image_debug=image_debug)
+        except TypeError as exc:
+            if "image_debug" not in str(exc):
+                raise
+            aggregation_result = self.call_workflow(image_url, user_hint)
         if isinstance(aggregation_result, StreamAggregationResult):
             aggregation = aggregation_result
         else:
@@ -230,12 +408,12 @@ class AliyunWorkflowParamGenerationService:
         raw_text = aggregation.raw_text.strip()
         if not raw_text:
             debug = dict(aggregation.upstream_debug)
-            debug["error_message"] = debug.get("error_message") or "模型输出为空"
+            debug["error_message"] = debug.get("error_message") or "阿里云应用已被调用，但应用观测显示无模型输入/输出，疑似应用未收到有效 prompt 或图片变量。"
             raise WorkflowParseError(
-                "模型输出为空",
+                "阿里云应用已被调用，但应用观测显示无模型输入/输出，疑似应用未收到有效 prompt 或图片变量。",
                 raw_workflow_response=aggregation.raw_events,
                 raw_text=raw_text,
-                errors=[{"path": "raw_text", "message": "模型输出为空；请检查 upstream_debug 中的 chunk_count/request_id/status_code"}],
+                errors=[{"path": "raw_text", "message": "模型输出为空；请检查 upstream_debug 中的 request payload、prompt 和 biz_params 图片变量"}],
                 upstream_debug=debug,
             )
         sanitized = extract_workflow_document(aggregation.raw_events, raw_text, aggregation.upstream_debug)
@@ -268,7 +446,14 @@ def aggregate_non_stream_body(raw_body: str, debug: dict[str, Any]) -> StreamAgg
         return StreamAggregationResult(raw_body.strip(), [raw_body], debug)
     text, event_debug = extract_text_from_event(event)
     _merge_event_debug(debug, event_debug)
-    return StreamAggregationResult(text.strip() if text else raw_body.strip(), [event], debug)
+    if text:
+        raw_text = text.strip()
+    elif any(key in event for key in ("output", "usage", "token_usage", "request_id", "requestId")):
+        raw_text = ""
+    else:
+        raw_text = raw_body.strip()
+    debug["raw_text_length"] = len(raw_text)
+    return StreamAggregationResult(raw_text, [event], debug)
 
 
 def aggregate_application_stream(response: Any, *, started: float, status_code: int, request_id: str | None = None) -> StreamAggregationResult:
@@ -331,7 +516,9 @@ def aggregate_application_stream(response: Any, *, started: float, status_code: 
         finish_reason=finish_reason,
         error_message=error_message,
     )
-    return StreamAggregationResult("".join(text_parts).strip(), raw_events, debug)
+    raw_text = "".join(text_parts).strip()
+    debug["raw_text_length"] = len(raw_text)
+    return StreamAggregationResult(raw_text, raw_events, debug)
 
 
 def extract_text_from_event(event: Any) -> tuple[str, dict[str, Any]]:
@@ -343,7 +530,12 @@ def extract_text_from_event(event: Any) -> tuple[str, dict[str, Any]]:
     debug["request_id"] = event.get("request_id") or event.get("requestId") or event.get("RequestId")
     debug["finish_reason"] = event.get("finish_reason") or event.get("finishReason")
     debug["error_message"] = _extract_error_message(event)
+    usage = event.get("usage") or event.get("token_usage") or event.get("tokenUsage")
+    if usage is not None:
+        debug["token_usage"] = usage
     output = event.get("output") if isinstance(event.get("output"), dict) else {}
+    if isinstance(output.get("usage"), dict):
+        debug["token_usage"] = output.get("usage")
     if output:
         debug["finish_reason"] = output.get("finish_reason") or output.get("finishReason") or debug.get("finish_reason")
     choices = event.get("choices") or output.get("choices")
@@ -375,7 +567,7 @@ def extract_text_from_event(event: Any) -> tuple[str, dict[str, Any]]:
 
 
 def _merge_event_debug(debug: dict[str, Any], event_debug: dict[str, Any]) -> None:
-    for key in ("request_id", "finish_reason", "error_message"):
+    for key in ("request_id", "finish_reason", "error_message", "token_usage"):
         if event_debug.get(key):
             debug[key] = event_debug[key]
 

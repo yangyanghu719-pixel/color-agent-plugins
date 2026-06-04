@@ -1,10 +1,12 @@
 from pathlib import Path
+import mimetypes
 from uuid import uuid4
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, UnidentifiedImageError
 
 from app.schemas.request_models import ExtractElementsRequest
 from app.schemas.response_models import ExtractElementsResponse, HealthResponse
@@ -33,6 +35,23 @@ extract_service = ElementExtractService()
 param_generation_service = CompositionParamGenerationService()
 workflow_param_generation_service = AliyunWorkflowParamGenerationService()
 MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | None = None) -> dict[str, Any]:
+    debug = {
+        "image_size_bytes": len(content),
+        "image_mime_type": content_type or mimetypes.guess_type(save_path.name)[0] or "",
+        "source_width": None,
+        "source_height": None,
+    }
+    try:
+        with Image.open(save_path) as img:
+            debug["source_width"] = img.width
+            debug["source_height"] = img.height
+            debug["image_mime_type"] = Image.MIME.get(img.format, debug["image_mime_type"])
+    except (UnidentifiedImageError, OSError):
+        pass
+    return debug
 
 
 def generation_error_response(
@@ -147,6 +166,17 @@ def validate_param_json(payload: dict) -> dict:
     return sanitize_composition_document(payload)
 
 
+@app.post("/composition/application-health-check")
+def composition_application_health_check() -> dict:
+    aggregation = workflow_param_generation_service.call_application("", "请只回复 OK", stream=False, image_debug={"health_check": True}, skip_image_check=True)
+    return {
+        "ok": "OK" in aggregation.raw_text.upper(),
+        "raw_text": aggregation.raw_text,
+        "raw_text_length": len(aggregation.raw_text),
+        "upstream_debug": aggregation.upstream_debug,
+    }
+
+
 @app.post("/composition/generate-param-json")
 async def composition_generate_param_json(
     image: UploadFile | None = File(default=None),
@@ -206,7 +236,8 @@ async def composition_generate_param_json_by_workflow(
     except WorkflowConfigurationError as exc:
         return workflow_error_response(500, "公网 URL 生成失败", errors=[{"path": "PUBLIC_BASE_URL", "message": str(exc)}])
     try:
-        result = workflow_param_generation_service.generate(image_url, user_hint)
+        image_debug = get_saved_image_debug(save_path, content, image.content_type)
+        result = workflow_param_generation_service.generate(image_url, user_hint, image_debug=image_debug)
         return result.as_dict()
     except WorkflowConfigurationError as exc:
         return workflow_error_response(503, "调用阿里云智能体应用失败：环境变量未配置", image_url=image_url, errors=[{"path": "env", "message": str(exc)}])
