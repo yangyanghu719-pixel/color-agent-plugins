@@ -248,7 +248,49 @@
       font-size: 0.8rem;
     }
     .color-row label { margin: 0; font-size: 0.8rem; }
-    .color-row input[type="range"] { min-height: 0; padding: 0; }
+    .color-row input[type="range"] {
+      min-height: 0;
+      height: 18px;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      box-shadow: none;
+      cursor: pointer;
+      accent-color: var(--primary);
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .color-row input[type="range"]::-webkit-slider-runnable-track {
+      height: 10px;
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      border-radius: 999px;
+      background: var(--hsl-track, #d6d3d1);
+    }
+    .color-row input[type="range"]::-moz-range-track {
+      height: 10px;
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      border-radius: 999px;
+      background: var(--hsl-track, #d6d3d1);
+    }
+    .color-row input[type="range"]::-webkit-slider-thumb {
+      width: 18px;
+      height: 18px;
+      margin-top: -5px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      background: var(--hsl-thumb, #0f172a);
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.42);
+      -webkit-appearance: none;
+    }
+    .color-row input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      background: var(--hsl-thumb, #0f172a);
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.42);
+    }
     .color-panel .empty { color: var(--muted); font-size: 0.84rem; }
     #canvas {
       width: 100%;
@@ -1067,6 +1109,34 @@
       return null;
     }
 
+    function updateHslSliderBackgrounds() {
+      const hueControl = $('hueControl');
+      const satControl = $('satControl');
+      const lightControl = $('lightControl');
+      if (!hueControl || !satControl || !lightControl) return;
+
+      const hue = Number(hueControl.value) || 0;
+      const saturation = clamp(satControl.value, 0, 100);
+      const lightness = clamp(lightControl.value, 0, 100);
+      const currentColor = hslToHex(hue, saturation, lightness);
+      const hueGradient = [
+        '#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#FF00FF', '#FF0000',
+      ].join(', ');
+
+      hueControl.style.setProperty('--hsl-track', `linear-gradient(90deg, ${hueGradient})`);
+      hueControl.style.setProperty('--hsl-thumb', currentColor);
+      satControl.style.setProperty(
+        '--hsl-track',
+        `linear-gradient(90deg, hsl(${hue}, 0%, ${lightness}%), hsl(${hue}, 100%, ${lightness}%))`,
+      );
+      satControl.style.setProperty('--hsl-thumb', currentColor);
+      lightControl.style.setProperty(
+        '--hsl-track',
+        `linear-gradient(90deg, #000000, hsl(${hue}, ${saturation}%, 50%), #FFFFFF)`,
+      );
+      lightControl.style.setProperty('--hsl-thumb', currentColor);
+    }
+
     function renderColorPanel() {
       colorPanel.innerHTML = '';
       const element = getSelected();
@@ -1098,6 +1168,7 @@
           <span id="lightValue">${hsl.l}%</span>
         </div>
       `;
+      updateHslSliderBackgrounds();
       ['hueControl', 'satControl', 'lightControl'].forEach((id) => {
         $(id).addEventListener('input', () => {
           const nextHex = hslToHex($('hueControl').value, $('satControl').value, $('lightControl').value);
@@ -1105,6 +1176,7 @@
           $('hueValue').textContent = $('hueControl').value;
           $('satValue').textContent = `${$('satControl').value}%`;
           $('lightValue').textContent = `${$('lightControl').value}%`;
+          updateHslSliderBackgrounds();
           updateElementById(element.id, (obj) => { obj[colorKey] = nextHex; });
           updateTextarea();
           renderCanvasPreview();
