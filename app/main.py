@@ -198,7 +198,6 @@ def workflow_error_response(
             "raw_text": raw_text,
             "raw_text_preview": raw_text[:1000] if raw_text else upstream_body_preview[:1000],
             "document": None,
-            "parsed_json": None,
             "textarea_json": "",
             "warnings": [],
             "dropped_elements": [],
@@ -280,12 +279,6 @@ def composition_param_test() -> HTMLResponse:
 @app.get("/composition-workflow-test", response_class=HTMLResponse)
 def composition_workflow_test() -> HTMLResponse:
     html = Path("app/templates/composition_workflow_test.html").read_text(encoding="utf-8")
-    return HTMLResponse(content=html)
-
-
-@app.get("/composition-ai-workflow-test", response_class=HTMLResponse)
-def composition_ai_workflow_test() -> HTMLResponse:
-    html = Path("app/templates/composition_ai_workflow_test.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 

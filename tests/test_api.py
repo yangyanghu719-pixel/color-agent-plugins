@@ -409,22 +409,6 @@ def test_composition_workflow_test_page_controls():
     assert "/static/js/composition_param_renderer.js" in text
 
 
-
-
-def test_composition_ai_workflow_test_page_available_and_uses_workflow_endpoint():
-    resp = client.get("/composition-ai-workflow-test")
-    assert resp.status_code == 200
-    text = resp.text
-    assert "阿里云智能体生成构图 JSON + 自动渲染" in text
-    assert "生成构图" in text
-    assert "调试信息（默认折叠）" in text
-    assert "/composition/generate-param-json-by-workflow" in text
-    assert "/composition/validate-param-json" in Path("static/js/composition_workflow_normalizer.js").read_text(encoding="utf-8")
-    assert "normalizeCompositionInput" in text
-    assert "cleaned_json" in text
-    assert "raw_text_preview" in text
-    assert "raw_json" in text
-
 def test_workflow_generate_requires_image():
     resp = client.post("/composition/generate-param-json-by-workflow")
     assert resp.status_code == 400
@@ -482,7 +466,6 @@ def test_workflow_generate_parses_application_output_text(tmp_path, monkeypatch)
     assert body["document"]["version"] == _sample_json()["version"]
     assert body["document"]["elements"]
     assert body["textarea_json"].startswith("{\n")
-    assert body["parsed_json"]["version"] == _sample_json()["version"]
     assert body["public_image_url"].startswith("https://composition-lab.onrender.com/static/uploads/workflow_inputs/")
     assert body["raw_text_preview"].startswith("```json")
 
