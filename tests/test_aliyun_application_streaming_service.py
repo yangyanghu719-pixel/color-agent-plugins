@@ -125,3 +125,154 @@ def test_application_sanitizer_invalid_when_all_elements_dropped():
 
     assert "清洗后没有可渲染元素" in str(exc_info.value)
     assert exc_info.value.errors
+
+class FakeJsonResponse:
+    status = 200
+    headers = {"X-Request-Id": "req-json"}
+
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+
+def _set_app_env(monkeypatch):
+    monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "key")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "app-1234567890")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
+
+
+def test_application_payload_contains_prompt_and_biz_params(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 12},
+    )
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["url"] = request.full_url
+        return FakeJsonResponse({"output": {"text": json.dumps(_sample_json(), ensure_ascii=False)}, "usage": {"total_tokens": 12}})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = service.call_application(
+        "https://public.example.com/static/uploads/workflow_inputs/a.png",
+        user_hint="保留主体",
+        stream=False,
+        image_debug={"image_size_bytes": 12, "image_mime_type": "image/png", "source_width": 10, "source_height": 20},
+    )
+
+    payload = captured["payload"]
+    assert payload["input"]["prompt"] == "保留主体"
+    assert "biz_params" in payload["input"]
+    assert payload["input"]["biz_params"]["imageUrl"].startswith("https://public.example.com/")
+    assert payload["input"]["biz_params"]["imageList"] == [payload["input"]["biz_params"]["imageUrl"]]
+    assert "image_list" not in payload["input"]
+    assert payload["parameters"]["incremental_output"] is False
+    assert result.upstream_debug["prompt_present"] is True
+    assert result.upstream_debug["biz_params_keys"]
+    assert result.upstream_debug["image_input_debug"]["value_type"] == "URL"
+    assert result.upstream_debug["token_usage"] == {"total_tokens": 12}
+
+
+def test_image_url_unreachable_blocks_application_call(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": False, "image_url_status": 404, "image_url_error": "not found"},
+    )
+    called = {"count": 0}
+
+    def fake_urlopen(*args, **kwargs):
+        called["count"] += 1
+        return FakeJsonResponse({})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(WorkflowRequestError) as exc_info:
+        service.call_application("https://public.example.com/missing.png", stream=False, image_debug={"image_size_bytes": 1})
+
+    assert called["count"] == 0
+    assert "图片 URL 不是公网可访问地址" in str(exc_info.value)
+    assert exc_info.value.upstream_debug["image_url_reachable"] is False
+    assert exc_info.value.upstream_debug["image_url_status"] == 404
+
+
+def test_fallback_disabled_makes_single_upstream_attempt(monkeypatch):
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    _set_app_env(monkeypatch)
+    monkeypatch.delenv("ALIYUN_APPLICATION_ENABLE_FALLBACK", raising=False)
+    monkeypatch.setattr(
+        aliyun_service,
+        "check_public_image_url",
+        lambda image_url: {"image_url_reachable": True, "image_url_status": 200, "image_url_content_type": "image/png", "image_url_content_length": 1},
+    )
+    calls = {"count": 0}
+
+    def fake_urlopen(*args, **kwargs):
+        calls["count"] += 1
+        raise urllib.error.URLError("stream failed")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(WorkflowRequestError) as exc_info:
+        service.call_workflow("https://public.example.com/a.png", image_debug={"image_size_bytes": 1})
+
+    assert calls["count"] == 1
+    assert exc_info.value.upstream_debug["attempt_count"] == 1
+    assert exc_info.value.upstream_debug["attempt_mode"] == "stream"
+
+
+def test_empty_raw_text_error_includes_payload_debug():
+    import app.services.aliyun_workflow_param_generation_service as aliyun_service
+
+    service = AliyunWorkflowParamGenerationService()
+    service.call_workflow = lambda image_url, user_hint=None, **kwargs: aliyun_service.StreamAggregationResult(  # type: ignore[name-defined]
+        "",
+        [],
+        {
+            "request_id": "req-empty",
+            "prompt_present": True,
+            "prompt_length": 8,
+            "biz_params_keys": ["imageUrl"],
+            "image_url_present": True,
+            "image_url_reachable": True,
+            "image_url_status": 200,
+            "image_input_field_name": "imageUrl",
+        },
+    )
+
+    with pytest.raises(WorkflowParseError) as exc_info:
+        service.generate("https://public.example.com/a.png", image_debug={"image_size_bytes": 1})
+
+    assert "疑似应用未收到有效 prompt 或图片变量" in str(exc_info.value)
+    assert exc_info.value.upstream_debug["prompt_present"] is True
+    assert exc_info.value.upstream_debug["biz_params_keys"] == ["imageUrl"]
+
+
+def test_public_image_url_generation_is_absolute():
+    service = AliyunWorkflowParamGenerationService()
+
+    image_url = service.public_image_url("https://composition-lab.onrender.com/", "/static/uploads/workflow_inputs/a.png")
+
+    assert image_url == "https://composition-lab.onrender.com/static/uploads/workflow_inputs/a.png"
+    assert not image_url.startswith("/static/")

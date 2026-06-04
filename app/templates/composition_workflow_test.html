@@ -144,12 +144,23 @@ function setWorkflowDebug(body){
   const node = $('workflow-debug');
   if(!node) return;
   if(!body){ node.textContent = 'debug 信息待命'; return; }
+  const upstream = body.upstream_debug || {};
   const debug = {
+    attempt_count: upstream.attempt_count ?? null,
+    attempt_mode: upstream.attempt_mode ?? null,
+    prompt_length: upstream.prompt_length ?? null,
+    biz_params_keys: upstream.biz_params_keys || [],
+    image_input_debug: upstream.image_input_debug || null,
+    image_url_reachable: upstream.image_url_reachable ?? upstream.image_input_debug?.image_url_reachable ?? null,
+    image_url_status: upstream.image_url_status ?? upstream.image_input_debug?.image_url_status ?? null,
+    raw_text_length: upstream.raw_text_length ?? (body.raw_text || '').length,
+    chunk_count: upstream.chunk_count ?? 0,
+    token_usage: upstream.token_usage || null,
     raw_text: truncateText(body.raw_text || ''),
     warnings: body.warnings || [],
     dropped_elements: body.dropped_elements || [],
     strict_validation: body.strict_validation || null,
-    upstream_debug: body.upstream_debug || null,
+    upstream_debug: upstream,
     errors: body.errors || [],
   };
   node.textContent = JSON.stringify(debug, null, 2);
@@ -162,12 +173,20 @@ function workflowErrorSummary(body){
   if(statusCode) parts.push(`HTTP ${statusCode}`);
   if(debug.request_id) parts.push(`request_id=${debug.request_id}`);
   if(debug.error_message) parts.push(debug.error_message);
+  if(debug.prompt_length !== undefined) parts.push(`prompt_length=${debug.prompt_length}`);
+  if(debug.biz_params_keys) parts.push(`biz_params_keys=${(debug.biz_params_keys || []).join(',')}`);
+  if(debug.image_url_reachable !== undefined) parts.push(`image_url_reachable=${debug.image_url_reachable}`);
   if(body.upstream_body_preview) parts.push(body.upstream_body_preview.slice(0, 240));
   if(body.raw_text) parts.push(`raw_text=${body.raw_text.slice(0, 240)}`);
   if((body.dropped_elements || []).length) parts.push(`dropped_elements=${body.dropped_elements.length}`);
   return parts.filter(Boolean).join(' | ');
 }
+let workflowInFlight = false;
 async function generateByWorkflow(){
+  if(workflowInFlight){
+    setWorkflowStatus('已有一次生成请求正在进行，请等待完成，避免重复调用阿里云应用');
+    return;
+  }
   const fileInput = $('workflow-image');
   const button = $('workflow-generate');
   const file = fileInput?.files?.[0];
@@ -188,6 +207,7 @@ async function generateByWorkflow(){
   form.append('image', file);
   form.append('user_hint', $('workflow-hint').value || '');
   button.disabled = true;
+  workflowInFlight = true;
   try{
     setWorkflowDebug(null);
     setWorkflowStatus('上传中...', true);
@@ -226,6 +246,7 @@ async function generateByWorkflow(){
     setWorkflowStatus(`生成失败：${e.message || e}`);
     setMessage('', `调用阿里云视觉智能体应用失败：${e.message || e}`);
   }finally{
+    workflowInFlight = false;
     button.disabled = false;
     $('workflow-progress').classList.remove('active');
   }
