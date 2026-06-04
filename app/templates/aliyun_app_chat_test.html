@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>阿里云 DashScope App Chat Test</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7fb; color: #172033; }
+    header { padding: 20px 24px; background: #111827; color: white; }
+    main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 18px; padding: 18px; }
+    section, form { background: white; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+    label { display: block; margin: 0 0 8px; font-weight: 700; }
+    textarea { width: 100%; min-height: 120px; resize: vertical; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; font: inherit; }
+    input[type="file"] { width: 100%; margin: 8px 0 16px; }
+    button { border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+    #sendBtn { background: #2563eb; color: white; }
+    #clearBtn { background: #e5e7eb; color: #111827; margin-left: 8px; }
+    .message { margin-bottom: 16px; border: 1px solid #dbe3ef; border-radius: 12px; overflow: hidden; }
+    .message h2 { margin: 0; padding: 10px 12px; background: #eef2ff; font-size: 16px; }
+    .message .body { padding: 12px; }
+    img.preview { max-width: 260px; max-height: 220px; display: block; border: 1px solid #e5e7eb; border-radius: 10px; margin-top: 8px; }
+    pre { margin: 8px 0 0; padding: 12px; background: #0f172a; color: #e2e8f0; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+    .grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px; align-items: start; }
+    .key { font-weight: 700; color: #475569; }
+    .status { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #fef3c7; color: #92400e; font-weight: 700; }
+    @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>阿里云 DashScope App 对话测试页</h1>
+    <p>独立 curl 复刻测试：上传图片、发送 prompt、原样查看后端返回的 SSE data chunk。</p>
+  </header>
+  <main>
+    <form id="chatForm">
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" name="prompt">go</textarea>
+      <label for="image">图片（png / jpg / jpeg / webp）</label>
+      <input id="image" name="image" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" />
+      <button id="sendBtn" type="submit">发送</button>
+      <button id="clearBtn" type="button">清空</button>
+    </form>
+    <section>
+      <div id="messages"></div>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById('chatForm');
+    const promptInput = document.getElementById('prompt');
+    const imageInput = document.getElementById('image');
+    const messages = document.getElementById('messages');
+    const clearBtn = document.getElementById('clearBtn');
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    }
+
+    function pretty(value) {
+      return JSON.stringify(value ?? null, null, 2);
+    }
+
+    function renderUserMessage(prompt, file) {
+      const url = file ? URL.createObjectURL(file) : '';
+      const imageHtml = url ? `<img class="preview" src="${url}" alt="上传图片预览" />` : '<p>未选择图片</p>';
+      messages.innerHTML = `
+        <article class="message">
+          <h2>用户消息</h2>
+          <div class="body">
+            <div class="grid"><div class="key">prompt</div><pre>${escapeHtml(prompt)}</pre></div>
+            <div class="grid"><div class="key">上传图片预览</div><div>${imageHtml}</div></div>
+            <div class="grid"><div class="key">public_image_url</div><pre id="publicUrl">等待后端生成...</pre></div>
+          </div>
+        </article>
+        <article class="message">
+          <h2>assistant / response</h2>
+          <div class="body" id="assistantBody">
+            <p><span class="status" id="status">上传中</span></p>
+          </div>
+        </article>`;
+    }
+
+    function renderResponse(data, statusText) {
+      document.getElementById('publicUrl').textContent = data.public_image_url || '';
+      const assistantBody = document.getElementById('assistantBody');
+      assistantBody.innerHTML = `
+        <p><span class="status">${escapeHtml(statusText)}</span></p>
+        <div class="grid"><div class="key">阿里云 HTTP status</div><pre>${escapeHtml(data.upstream_status)}</pre></div>
+        <div class="grid"><div class="key">final_text</div><pre>${escapeHtml(data.final_text || '')}</pre></div>
+        <div class="grid"><div class="key">raw_sse_data_lines</div><pre>${escapeHtml(pretty(data.raw_sse_data_lines))}</pre></div>
+        <div class="grid"><div class="key">parsed_events</div><pre>${escapeHtml(pretty(data.parsed_events))}</pre></div>
+        <div class="grid"><div class="key">full_raw_preview</div><pre>${escapeHtml(data.full_raw_preview || '')}</pre></div>
+        <div class="grid"><div class="key">upstream_debug</div><pre>${escapeHtml(pretty(data.upstream_debug))}</pre></div>
+        <div class="grid"><div class="key">request_debug</div><pre>${escapeHtml(pretty(data.request_debug))}</pre></div>`;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const prompt = promptInput.value.trim() || 'go';
+      const file = imageInput.files[0];
+      renderUserMessage(prompt, file);
+      const status = document.getElementById('status');
+      const formData = new FormData();
+      formData.append('prompt', prompt);
+      if (file) formData.append('image', file);
+      try {
+        status.textContent = '上传中';
+        status.textContent = '调用阿里云中';
+        const response = await fetch('/aliyun-app-chat-test/send', { method: 'POST', body: formData });
+        const data = await response.json();
+        renderResponse(data, response.ok && data.ok ? '成功' : '失败');
+      } catch (error) {
+        renderResponse({ upstream_status: null, final_text: '', raw_sse_data_lines: [], parsed_events: [], full_raw_preview: String(error), upstream_debug: { error_message: String(error) }, request_debug: {}, public_image_url: '' }, '失败');
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      promptInput.value = 'go';
+      imageInput.value = '';
+      messages.innerHTML = '';
+    });
+  </script>
+</body>
+</html>
