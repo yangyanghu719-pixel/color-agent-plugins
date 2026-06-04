@@ -1,5 +1,7 @@
 from pathlib import Path
+import asyncio
 import json
+import urllib.parse
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
@@ -471,6 +473,92 @@ def test_workflow_generate_reports_invalid_json(tmp_path, monkeypatch):
     assert body["message"] == "返回文本不是合法 JSON"
     assert body["raw_text"] == "not json"
 
+
+def test_workflow_same_host_uses_local_file_check_and_absolute_url(tmp_path, monkeypatch):
+    from app.main import workflow_param_generation_service
+    import app.main as main_module
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://composition-lab.onrender.com")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_API_KEY", "test-key")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_APP_ID", "test-app")
+    monkeypatch.setenv("ALIYUN_WORKFLOW_BASE_URL", "https://dashscope.example.com/apps")
+
+    async def fail_async_http_check(image_url):
+        raise AssertionError("same-host URL must not trigger HTTP self-check")
+
+    captured = {}
+
+    def fake_call_workflow(image_url, user_hint=None, **kwargs):
+        captured["image_url"] = image_url
+        captured["image_debug"] = kwargs.get("image_debug")
+        return {"output": {"text": f"```json\n{json.dumps(_sample_json())}\n```"}}
+
+    monkeypatch.setattr(main_module, "check_public_image_url_async", fail_async_http_check)
+    monkeypatch.setattr(workflow_param_generation_service, "call_workflow", fake_call_workflow)
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+
+    with image_path.open("rb") as f:
+        resp = client.post(
+            "/composition/generate-param-json-by-workflow",
+            files={"image": ("reference.png", f, "image/png")},
+            data={"user_hint": "保留主体"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    image_debug = captured["image_debug"]
+    assert captured["image_url"].startswith("https://composition-lab.onrender.com/static/uploads/workflow_inputs/")
+    assert not captured["image_url"].startswith("/static/uploads/")
+    assert image_debug["public_image_url"] == captured["image_url"]
+    assert image_debug["image_url_host"] == "composition-lab.onrender.com"
+    assert image_debug["image_url_check_mode"] == "local_file_check"
+    assert image_debug["local_file_exists"] is True
+    assert image_debug["local_file_size_bytes"] > 0
+    assert image_debug["image_url_reachable"] == "skipped_same_host"
+    assert body["image_url"] == captured["image_url"]
+    static_path = urllib.parse.urlparse(captured["image_url"]).path
+    static_resp = client.get(static_path)
+    assert static_resp.status_code == 200
+    assert static_resp.content
+
+
+def test_workflow_external_url_debug_uses_async_reachability_check(tmp_path, monkeypatch):
+    import app.main as main_module
+
+    image_path = tmp_path / "reference.png"
+    _create_test_image(image_path)
+    called = {}
+
+    async def fake_async_http_check(image_url):
+        called["image_url"] = image_url
+        return {
+            "public_image_url": image_url,
+            "image_url_host": "cdn.example.com",
+            "image_url_check_mode": "async_http_check",
+            "local_file_exists": None,
+            "local_file_size_bytes": None,
+            "image_url_reachable": True,
+            "image_url_status": 200,
+            "image_url_content_type": "image/png",
+            "image_url_content_length": 12,
+            "image_url_error": None,
+        }
+
+    monkeypatch.setattr(main_module, "check_public_image_url_async", fake_async_http_check)
+
+    debug = asyncio.run(main_module.build_workflow_image_debug(
+        image_url="https://cdn.example.com/static/uploads/workflow_inputs/reference.png",
+        public_base_url="https://composition-lab.onrender.com",
+        save_path=image_path,
+        content=image_path.read_bytes(),
+        content_type="image/png",
+    ))
+
+    assert called["image_url"] == "https://cdn.example.com/static/uploads/workflow_inputs/reference.png"
+    assert debug["image_url_check_mode"] == "async_http_check"
+    assert debug["image_url_reachable"] is True
+    assert debug["public_image_url"].startswith("https://cdn.example.com/")
 
 def test_composition_param_test_still_available_after_workflow_page():
     resp = client.get("/composition-param-test")

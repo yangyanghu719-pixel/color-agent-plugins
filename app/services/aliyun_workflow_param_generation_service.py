@@ -5,6 +5,9 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
+
+import httpx
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -183,8 +186,19 @@ def build_payload_debug(
         "image_input_field_name": image_field_name,
         "image_url_present": bool(image_url),
         "image_input_debug": image_input_debug,
+        "public_image_url": image_input_debug.get("public_image_url") or image_url,
+        "image_url_host": image_input_debug.get("image_url_host"),
+        "image_url_check_mode": image_input_debug.get("image_url_check_mode"),
+        "local_file_exists": image_input_debug.get("local_file_exists"),
+        "local_file_size_bytes": image_input_debug.get("local_file_size_bytes"),
+        "image_mime_type": image_input_debug.get("image_mime_type"),
+        "source_width": image_input_debug.get("source_width"),
+        "source_height": image_input_debug.get("source_height"),
         "image_url_reachable": image_input_debug.get("image_url_reachable"),
         "image_url_status": image_input_debug.get("image_url_status"),
+        "image_url_error": image_input_debug.get("image_url_error"),
+        "image_url_check_warning": image_input_debug.get("image_url_check_warning"),
+        "application_call_attempted": image_input_debug.get("application_call_attempted", False),
         "raw_text_length": 0,
         "token_usage": None,
         "sanitized_request_payload": {
@@ -207,8 +221,117 @@ def merge_debug(base: dict[str, Any], extra: dict[str, Any] | None) -> dict[str,
     return merged
 
 
-def check_public_image_url(image_url: str, *, timeout: float = 10.0) -> dict[str, Any]:
+ALLOWED_PUBLIC_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
+IMAGE_URL_CHECK_KEYS = {
+    "public_image_url",
+    "image_url_host",
+    "image_url_check_mode",
+    "local_file_exists",
+    "local_file_size_bytes",
+    "image_url_reachable",
+    "image_url_status",
+    "image_url_content_type",
+    "image_url_content_length",
+    "image_url_error",
+    "image_url_check_warning",
+}
+
+
+def _content_length(headers: Any) -> int | None:
+    content_length_raw = headers.get("Content-Length") if headers else None
+    return int(content_length_raw) if content_length_raw and str(content_length_raw).isdigit() else None
+
+
+def _content_type(headers: Any) -> str:
+    return (headers.get("Content-Type", "") if headers else "").split(";", 1)[0].strip().lower()
+
+
+def build_local_file_image_url_check(image_url: str, local_file_path: str | Path) -> dict[str, Any]:
+    parsed = urllib.parse.urlparse(image_url)
+    path = Path(local_file_path)
+    exists = path.is_file()
+    size = path.stat().st_size if exists else 0
+    return {
+        "public_image_url": image_url,
+        "image_url_host": parsed.netloc,
+        "image_url_check_mode": "local_file_check",
+        "local_file_exists": exists,
+        "local_file_size_bytes": size,
+        "image_url_reachable": "skipped_same_host",
+        "image_url_status": None,
+        "image_url_content_type": None,
+        "image_url_content_length": None,
+        "image_url_error": None if exists else "local file missing",
+        "image_url_check_warning": "图片 URL 本地自检超时，已改用本地文件检查；如果本地文件存在，将继续调用阿里云。",
+    }
+
+
+async def check_public_image_url_async(image_url: str) -> dict[str, Any]:
+    parsed = urllib.parse.urlparse(image_url)
     debug = {
+        "public_image_url": image_url,
+        "image_url_host": parsed.netloc,
+        "image_url_check_mode": "async_http_check",
+        "local_file_exists": None,
+        "local_file_size_bytes": None,
+        "image_url_reachable": False,
+        "image_url_status": None,
+        "image_url_content_type": None,
+        "image_url_content_length": None,
+        "image_url_error": None,
+    }
+    if parsed.scheme not in {"http", "https"}:
+        debug["image_url_error"] = "image_url is not an absolute HTTP(S) URL"
+        return debug
+
+    timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+    headers = {"User-Agent": "composition-lab-url-check/1.0"}
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            head_error: str | None = None
+            try:
+                response = await client.head(image_url, headers=headers)
+                debug.update({
+                    "image_url_status": response.status_code,
+                    "image_url_content_type": _content_type(response.headers),
+                    "image_url_content_length": _content_length(response.headers),
+                })
+                if 200 <= response.status_code < 300 and debug["image_url_content_type"] in ALLOWED_PUBLIC_IMAGE_MIME_TYPES and (debug["image_url_content_length"] is None or debug["image_url_content_length"] > 0):
+                    debug["image_url_reachable"] = True
+                    return debug
+                head_error = f"HEAD status={response.status_code} content_type={debug['image_url_content_type']}"
+            except Exception as exc:
+                head_error = str(exc)
+
+            get_headers = {**headers, "Range": "bytes=0-1023"}
+            async with client.stream("GET", image_url, headers=get_headers) as response:
+                debug.update({
+                    "image_url_status": response.status_code,
+                    "image_url_content_type": _content_type(response.headers),
+                    "image_url_content_length": _content_length(response.headers),
+                })
+                sample = b""
+                async for chunk in response.aiter_bytes():
+                    sample += chunk[:1024 - len(sample)]
+                    if sample:
+                        break
+                debug["image_url_reachable"] = 200 <= response.status_code < 300 and debug["image_url_content_type"] in ALLOWED_PUBLIC_IMAGE_MIME_TYPES and (debug["image_url_content_length"] is None or debug["image_url_content_length"] > 0) and bool(sample)
+                if not debug["image_url_reachable"]:
+                    debug["image_url_error"] = f"GET check failed after HEAD fallback ({head_error})"
+    except Exception as exc:
+        debug["image_url_error"] = str(exc)
+    return debug
+
+
+def check_public_image_url(image_url: str, *, timeout: float = 10.0) -> dict[str, Any]:
+    """Synchronous fallback for non-request callers; request handlers should await check_public_image_url_async."""
+    parsed = urllib.parse.urlparse(image_url)
+    debug = {
+        "public_image_url": image_url,
+        "image_url_host": parsed.netloc,
+        "image_url_check_mode": "sync_http_check",
+        "local_file_exists": None,
+        "local_file_size_bytes": None,
         "image_url_reachable": False,
         "image_url_status": None,
         "image_url_content_type": None,
@@ -218,25 +341,38 @@ def check_public_image_url(image_url: str, *, timeout: float = 10.0) -> dict[str
     if not image_url.startswith(("http://", "https://")):
         debug["image_url_error"] = "image_url is not an absolute HTTP(S) URL"
         return debug
-    request = urllib.request.Request(image_url, method="GET", headers={"Range": "bytes=0-0", "User-Agent": "composition-lab-url-check/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            status = getattr(response, "status", 200)
-            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-            content_length_raw = response.headers.get("Content-Length")
-            content_length = int(content_length_raw) if content_length_raw and content_length_raw.isdigit() else None
-            sample = response.read(1)
+        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0), follow_redirects=True) as client:
+            response = client.get(image_url, headers={"Range": "bytes=0-1023", "User-Agent": "composition-lab-url-check/1.0"})
+            content_type = _content_type(response.headers)
+            content_length = _content_length(response.headers)
             debug.update({
-                "image_url_status": status,
+                "image_url_status": response.status_code,
                 "image_url_content_type": content_type,
                 "image_url_content_length": content_length,
-                "image_url_reachable": 200 <= status < 300 and content_type in {"image/png", "image/jpeg", "image/webp"} and (content_length is None or content_length > 0) and bool(sample),
+                "image_url_reachable": 200 <= response.status_code < 300 and content_type in ALLOWED_PUBLIC_IMAGE_MIME_TYPES and (content_length is None or content_length > 0) and bool(response.content[:1]),
             })
-    except urllib.error.HTTPError as exc:
-        debug.update({"image_url_status": exc.code, "image_url_error": str(exc)})
     except Exception as exc:
         debug["image_url_error"] = str(exc)
     return debug
+
+
+def extract_image_url_check_debug(image_debug: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not image_debug or "image_url_check_mode" not in image_debug:
+        return None
+    return {key: image_debug.get(key) for key in IMAGE_URL_CHECK_KEYS if key in image_debug}
+
+
+def image_url_check_allows_application(image_url_check: dict[str, Any]) -> bool:
+    if image_url_check.get("image_url_check_mode") == "local_file_check":
+        return image_url_check.get("local_file_exists") is True
+    return image_url_check.get("image_url_reachable") is True
+
+
+def image_url_check_error_message(image_url_check: dict[str, Any]) -> str:
+    if image_url_check.get("image_url_check_mode") == "local_file_check" and not image_url_check.get("local_file_exists"):
+        return "图片本地文件不存在，无法继续调用阿里云应用"
+    return "图片 URL 不是公网可访问地址，阿里云应用无法读取图片"
 
 
 class AliyunWorkflowParamGenerationService:
@@ -316,7 +452,13 @@ class AliyunWorkflowParamGenerationService:
             read_timeout = 300.0
         url = f"{base_url}/{app_id}/completion"
         skip_image_check = skip_image_check or image_debug is None
-        image_url_check = {"image_url_reachable": None, "image_url_status": None} if skip_image_check else check_public_image_url(image_url)
+        precomputed_image_url_check = extract_image_url_check_debug(image_debug)
+        if skip_image_check:
+            image_url_check = {"image_url_reachable": None, "image_url_status": None, "application_call_attempted": False}
+        elif precomputed_image_url_check is not None:
+            image_url_check = {**precomputed_image_url_check, "application_call_attempted": False}
+        else:
+            image_url_check = {**check_public_image_url(image_url), "application_call_attempted": False}
         image_field_name = self._env("ALIYUN_APPLICATION_IMAGE_FIELD", default="imageUrl")
         biz_params = {
             "source_width": (image_debug or {}).get("source_width"),
@@ -343,12 +485,15 @@ class AliyunWorkflowParamGenerationService:
             attempt_mode="stream" if stream else "non_stream",
         )
         logger.info("Aliyun application sanitized request payload: %s", json.dumps(payload_debug, ensure_ascii=False, default=str))
-        if not skip_image_check and not image_url_check.get("image_url_reachable"):
+        if not skip_image_check and not image_url_check_allows_application(image_url_check):
+            message = image_url_check_error_message(image_url_check)
             debug = build_upstream_debug(
-                error_message="图片 URL 不是公网可访问地址，阿里云应用无法读取图片",
+                error_message=message,
                 **payload_debug,
             )
-            raise WorkflowRequestError("图片 URL 不是公网可访问地址，阿里云应用无法读取图片", None, "", upstream_debug=debug)
+            raise WorkflowRequestError(message, None, "", upstream_debug=debug)
+        payload_debug["application_call_attempted"] = True
+        payload_debug["image_input_debug"]["application_call_attempted"] = True
         body = json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {api_key}",

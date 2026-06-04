@@ -1,5 +1,6 @@
 from pathlib import Path
 import mimetypes
+import urllib.parse
 from uuid import uuid4
 from typing import Any
 
@@ -22,6 +23,8 @@ from app.services.aliyun_workflow_param_generation_service import (
     WorkflowConfigurationError,
     WorkflowParseError,
     WorkflowRequestError,
+    build_local_file_image_url_check,
+    check_public_image_url_async,
 )
 
 app = FastAPI(title="Composition Lab API", version="0.3.0")
@@ -51,6 +54,28 @@ def get_saved_image_debug(save_path: Path, content: bytes, content_type: str | N
             debug["image_mime_type"] = Image.MIME.get(img.format, debug["image_mime_type"])
     except (UnidentifiedImageError, OSError):
         pass
+    return debug
+
+
+def is_same_public_host(image_url: str, public_base_url: str) -> bool:
+    image_host = urllib.parse.urlparse(image_url).netloc.lower()
+    public_host = urllib.parse.urlparse(public_base_url).netloc.lower()
+    return bool(image_host and public_host and image_host == public_host)
+
+
+async def build_workflow_image_debug(
+    *,
+    image_url: str,
+    public_base_url: str,
+    save_path: Path,
+    content: bytes,
+    content_type: str | None = None,
+) -> dict[str, Any]:
+    debug = get_saved_image_debug(save_path, content, content_type)
+    if is_same_public_host(image_url, public_base_url):
+        debug.update(build_local_file_image_url_check(image_url, save_path))
+    else:
+        debug.update(await check_public_image_url_async(image_url))
     return debug
 
 
@@ -236,7 +261,13 @@ async def composition_generate_param_json_by_workflow(
     except WorkflowConfigurationError as exc:
         return workflow_error_response(500, "公网 URL 生成失败", errors=[{"path": "PUBLIC_BASE_URL", "message": str(exc)}])
     try:
-        image_debug = get_saved_image_debug(save_path, content, image.content_type)
+        image_debug = await build_workflow_image_debug(
+            image_url=image_url,
+            public_base_url=public_base_url,
+            save_path=save_path,
+            content=content,
+            content_type=image.content_type,
+        )
         result = workflow_param_generation_service.generate(image_url, user_hint, image_debug=image_debug)
         return result.as_dict()
     except WorkflowConfigurationError as exc:
