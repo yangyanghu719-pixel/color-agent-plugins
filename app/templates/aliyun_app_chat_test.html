@@ -163,7 +163,7 @@
 
     #sendBtn:hover:not(:disabled), #applyJsonBtn:hover:not(:disabled), #addObjectBtn:hover:not(:disabled), #analyzeAbBtn:hover:not(:disabled), #analyzeColorAbBtn:hover:not(:disabled) { background: var(--primary-dark); }
 
-    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn, #saveAbtn, #saveBbtn, #saveColorAbtn, #saveColorBbtn, #downloadOperationCsvBtn {
+    #clearBtn, #copyBtn, #clearCanvasBtn, #deleteObjectBtn, #duplicateObjectBtn, #bringForwardBtn, #sendBackwardBtn, #saveAbtn, #saveBbtn, #saveColorAbtn, #saveColorBbtn {
       background: var(--soft);
       color: #1e3a8a;
     }
@@ -460,10 +460,9 @@
 
         <section class="card">
           <div class="panel-head">
-            <h2>操作数据收集</h2>
-            <button id="downloadOperationCsvBtn" type="button">下载表格</button>
+            <h2>后台保存状态</h2>
           </div>
-          <div id="operationLogStatus" class="meta">后台会按任务编号持续记录上传、生成、保存 A/B、分析和主要按钮操作；如服务器配置 GITHUB_OPERATION_TOKEN，会同步提交到 GitHub composition-lab-data 分支的 backend_data_storage 文件夹。</div>
+          <div id="operationLogStatus" class="meta">后台只保存上传原图、JSON 渲染 PNG/JSON 文件夹，以及完成构图或色彩 A/B 分析后的三份结果文件。</div>
         </section>
 
         <section class="card result" aria-labelledby="resultTitle">
@@ -632,28 +631,6 @@
       operationLogStatus.textContent = `任务编号：${currentTaskId}${jsonText}；${message}`;
     }
 
-    async function logUiOperation(eventType, eventLabel) {
-      try {
-        const response = await fetch('/aliyun-app-chat-test/operation-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: currentTaskId, event_type: eventType, event_label: eventLabel }),
-        });
-        const data = await response.json();
-        if (data.task_id) currentTaskId = data.task_id;
-        updateOperationLogStatus('已自动保存最近一次操作；若 GitHub Token 已配置，后台会同步提交到仓库。');
-      } catch (error) {
-        updateOperationLogStatus('当前操作暂未写入后台，请稍后重试。');
-      }
-    }
-
-    const debouncedOperationLog = (() => {
-      let timer = null;
-      return (eventType, eventLabel) => {
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => logUiOperation(eventType, eventLabel), 600);
-      };
-    })();
 
     const comparisonConfigs = {
       composition: {
@@ -1714,19 +1691,6 @@
       setBusy(false);
     });
 
-    $('downloadOperationCsvBtn').addEventListener('click', () => {
-      window.location.href = '/aliyun-app-chat-test/operation-log.csv';
-      updateOperationLogStatus('已请求下载 CSV 表格；浏览器会保存到你的默认下载文件夹。');
-    });
-
-    document.addEventListener('click', (event) => {
-      const target = event.target.closest('button');
-      if (!target?.id || target.id === 'downloadOperationCsvBtn') return;
-      logUiOperation('button_click', target.textContent.trim() || target.id);
-    });
-
-    promptInput.addEventListener('input', () => debouncedOperationLog('prompt_edit', '修改 Prompt'));
-    jsonOutput.addEventListener('input', () => debouncedOperationLog('json_edit', '修改 textarea_json'));
     imageInput.addEventListener('change', () => {
       currentTaskId = `task-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
       currentJsonSaveId = null;
@@ -1734,11 +1698,10 @@
       colorAbSlots = { A: null, B: null };
       comparisonConfigs.composition.slots = abSlots;
       comparisonConfigs.color.slots = colorAbSlots;
-      logUiOperation('image_selected', imageInput.files[0]?.name || '清空图片选择');
+      updateOperationLogStatus(imageInput.files[0] ? '已选择新图片，提交后会保存到对应 upload_图片ID 文件夹。' : '已清空图片选择。');
     });
     window.addEventListener('load', () => {
-      updateOperationLogStatus('页面已打开，等待操作。');
-      logUiOperation('page_open', '打开阿里云 App Chat 测试页');
+      updateOperationLogStatus('页面已打开，等待上传图片。');
     });
 
     $('saveAbtn').addEventListener('click', () => saveCurrentAs('composition', 'A'));

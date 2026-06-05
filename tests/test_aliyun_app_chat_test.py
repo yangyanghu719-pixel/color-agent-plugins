@@ -289,45 +289,25 @@ def test_aliyun_app_chat_test_analyze_ab_color_uses_color_teacher_prompt(monkeyp
     assert body["request_debug"]["analysis_type"] == "color"
 
 
-def test_aliyun_app_chat_test_page_has_operation_log_controls():
+def test_aliyun_app_chat_test_page_describes_minimal_backend_storage():
     resp = client.get("/aliyun-app-chat-test")
 
     assert resp.status_code == 200
-    assert "操作数据收集" in resp.text
-    assert 'id="downloadOperationCsvBtn"' in resp.text
-    assert "/aliyun-app-chat-test/operation-log" in resp.text
-    assert "/aliyun-app-chat-test/operation-log.csv" in resp.text
-    assert "backend_data_storage" in resp.text
-    assert "task_id" in resp.text
-
-
-def test_aliyun_app_chat_test_operation_log_records_csv_row():
-    task_id = "pytest-task-001"
-
-    resp = client.post(
-        "/aliyun-app-chat-test/operation-log",
-        json={"task_id": task_id, "event_type": "button_click", "event_label": "生成 JSON"},
-    )
-    csv_resp = client.get("/aliyun-app-chat-test/operation-log.csv")
-
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "task_id": task_id}
-    assert csv_resp.status_code == 200
-    assert "text/csv" in csv_resp.headers["content-type"]
-    csv_text = csv_resp.content.decode("utf-8-sig")
-    assert "task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image" in csv_text
-    assert task_id in csv_text
-    assert "button_click" in csv_text
-    assert "生成 JSON" in csv_text
+    assert "后台保存状态" in resp.text
+    assert "只保存上传原图、JSON 渲染 PNG/JSON 文件夹" in resp.text
+    assert "完成构图或色彩 A/B 分析后的三份结果文件" in resp.text
+    assert 'id="downloadOperationCsvBtn"' not in resp.text
+    assert "/aliyun-app-chat-test/operation-log" not in resp.text
+    assert "/aliyun-app-chat-test/operation-log.csv" not in resp.text
 
 
 def test_operation_artifact_uses_upload_folder_structure(monkeypatch):
     monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
 
-    result = main.write_operation_text_artifact("pytest-folder-001", "任务1_构图比较/构图对比分析文本.txt", "分析文本", "test commit")
+    result = main.write_operation_text_artifact("pytest-folder-001", "JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_分析结果.md", "分析文本", "test commit")
 
     assert "upload_pytest-folder-001" in result["local_path"]
-    assert result["repo_path"] == "backend_data_storage/upload_pytest-folder-001/任务1_构图比较/构图对比分析文本.txt"
+    assert result["repo_path"] == "backend_data_storage/upload_pytest-folder-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_分析结果.md"
     assert result["github"]["enabled"] is False
 
 
@@ -356,7 +336,7 @@ def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
     monkeypatch.setattr(main.requests, "get", fake_get)
     monkeypatch.setattr(main.requests, "put", fake_put)
 
-    result = main.github_put_file("backend_data_storage/upload_t1/当前任务汇总.json", b"{}", "save data")
+    result = main.github_put_file("backend_data_storage/upload_t1/JSON_2026-06-05T00-00-00Z/JSON_2026-06-05T00-00-00Z.json", b"{}", "save data")
 
     assert result["ok"] is True
     assert calls["get"]["params"] == {"ref": "composition-lab-data"}
@@ -397,7 +377,6 @@ def test_completed_ab_analysis_artifacts_use_single_timestamp_folder(monkeypatch
 
     saved = main.write_completed_ab_analysis_artifacts(
         task_id="pytest-ab-001",
-        kind="composition",
         image_a_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-a.png",
         image_b_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-b.png",
         analysis_text="分析结果",
@@ -412,4 +391,31 @@ def test_completed_ab_analysis_artifacts_use_single_timestamp_folder(monkeypatch
         "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_图片A.png",
         "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_图片B.png",
         "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_分析结果.md",
+    ]
+
+
+def test_completed_ab_color_analysis_artifacts_use_color_prefix(monkeypatch):
+    monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
+    image_a_path = main.WORKFLOW_INPUT_DIR / "pytest-color-a.png"
+    image_b_path = main.WORKFLOW_INPUT_DIR / "pytest-color-b.png"
+    image_a_path.write_bytes(_png_bytes())
+    image_b_path.write_bytes(_png_bytes())
+
+    saved = main.write_completed_ab_analysis_artifacts(
+        task_id="pytest-color-ab-001",
+        image_a_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-color-a.png",
+        image_b_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-color-b.png",
+        analysis_text="色彩分析结果",
+        json_save_id="JSON_2026-06-05T00-00-00Z",
+        analysis_save_id="色彩分析_2026-06-05T00-02-00Z",
+        kind="color",
+    )
+
+    assert saved["json_save_id"] == "JSON_2026-06-05T00-00-00Z"
+    assert saved["analysis_save_id"] == "色彩分析_2026-06-05T00-02-00Z"
+    repo_paths = [artifact["repo_path"] for artifact in saved["artifacts"]]
+    assert repo_paths == [
+        "backend_data_storage/upload_pytest-color-ab-001/JSON_2026-06-05T00-00-00Z/色彩分析_2026-06-05T00-02-00Z_图片A.png",
+        "backend_data_storage/upload_pytest-color-ab-001/JSON_2026-06-05T00-00-00Z/色彩分析_2026-06-05T00-02-00Z_图片B.png",
+        "backend_data_storage/upload_pytest-color-ab-001/JSON_2026-06-05T00-00-00Z/色彩分析_2026-06-05T00-02-00Z_分析结果.md",
     ]
