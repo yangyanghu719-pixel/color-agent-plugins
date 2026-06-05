@@ -45,8 +45,9 @@ def test_aliyun_app_chat_test_page_has_controls():
     resp = client.get("/aliyun-app-chat-test")
 
     assert resp.status_code == 200
-    assert 'id="prompt"' in resp.text
-    assert 'name="prompt"' in resp.text
+    assert 'id="prompt"' not in resp.text
+    assert 'name="prompt"' not in resp.text
+    assert "Prompt" not in resp.text
     assert 'type="file"' in resp.text
     assert 'name="image"' in resp.text
     assert "生成 JSON" in resp.text
@@ -289,13 +290,14 @@ def test_aliyun_app_chat_test_analyze_ab_color_uses_color_teacher_prompt(monkeyp
     assert body["request_debug"]["analysis_type"] == "color"
 
 
-def test_aliyun_app_chat_test_page_describes_minimal_backend_storage():
+def test_aliyun_app_chat_test_page_hides_backend_storage_panel():
     resp = client.get("/aliyun-app-chat-test")
 
     assert resp.status_code == 200
-    assert "后台保存状态" in resp.text
-    assert "只保存上传原图、JSON 渲染 PNG/JSON 文件夹" in resp.text
-    assert "完成构图或色彩 A/B 分析后的三份结果文件" in resp.text
+    assert "后台保存状态" not in resp.text
+    assert "只保存上传原图、JSON 渲染 PNG/JSON 文件夹" not in resp.text
+    assert "完成构图或色彩 A/B 分析后的三份结果文件" not in resp.text
+    assert 'id="operationLogStatus"' not in resp.text
     assert 'id="downloadOperationCsvBtn"' not in resp.text
     assert "/aliyun-app-chat-test/operation-log" not in resp.text
     assert "/aliyun-app-chat-test/operation-log.csv" not in resp.text
