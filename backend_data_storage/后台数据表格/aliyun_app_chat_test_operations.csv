@@ -1,3 +1,203 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
 task-1780620684678-f8a2e4,2026-06-05T00:51:24+00:00,2026-06-05T00:51:24+00:00,,,,,,,,,,page_open,打开阿里云 App Chat 测试页
-task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:51:42+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-4472af1d0dac4017b561a814aef12a74.png,,,,,,,,manual_upload,手动上传图片
+task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:52:26+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-4472af1d0dac4017b561a814aef12a74.png,"{
+  ""version"": ""1.0"",
+  ""canvas"": {
+    ""width"": 1000,
+    ""height"": 667,
+    ""background"": ""#FFFFFF""
+  },
+  ""source_summary"": {
+    ""input_type"": ""image_upload"",
+    ""abstract_style"": ""geometric_constructivism"",
+    ""visual_center"": [
+      0.48,
+      0.62
+    ],
+    ""balance"": ""centered"",
+    ""density"": ""medium"",
+    ""main_subject"": ""hill"",
+    ""subject_region"": [
+      0.0,
+      0.54,
+      1.0,
+      0.46
+    ],
+    ""subject_priority"": ""high"",
+    ""image_palette"": [
+      ""#1E90FF"",
+      ""#FFFFFF"",
+      ""#3CB371"",
+      ""#7CFC00"",
+      ""#228B22""
+    ]
+  },
+  ""elements"": [
+    {
+      ""id"": ""bg_sky"",
+      ""type"": ""rectangle"",
+      ""role"": ""background_support"",
+      ""x"": 0.0,
+      ""y"": 0.0,
+      ""width"": 1.0,
+      ""height"": 0.55,
+      ""fill"": ""#1E90FF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 1
+    },
+    {
+      ""id"": ""cloud_1"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.68,
+      ""y"": 0.31,
+      ""width"": 0.22,
+      ""height"": 0.11,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_2"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.45,
+      ""y"": 0.37,
+      ""width"": 0.18,
+      ""height"": 0.09,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_3"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.2,
+      ""y"": 0.22,
+      ""width"": 0.14,
+      ""height"": 0.07,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""cloud_4"",
+      ""type"": ""ellipse"",
+      ""role"": ""support_plane"",
+      ""x"": 0.07,
+      ""y"": 0.33,
+      ""width"": 0.16,
+      ""height"": 0.08,
+      ""fill"": ""#FFFFFF"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 2
+    },
+    {
+      ""id"": ""hill_main"",
+      ""type"": ""rectangle"",
+      ""role"": ""dominant_plane"",
+      ""x"": 0.0,
+      ""y"": 0.54,
+      ""width"": 1.0,
+      ""height"": 0.46,
+      ""fill"": ""#3CB371"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 3
+    },
+    {
+      ""id"": ""hill_shadow"",
+      ""type"": ""rectangle"",
+      ""role"": ""support_plane"",
+      ""x"": 0.55,
+      ""y"": 0.54,
+      ""width"": 0.45,
+      ""height"": 0.46,
+      ""fill"": ""#228B22"",
+      ""opacity"": 0.85,
+      ""rotation"": 0.0,
+      ""z_index"": 4
+    },
+    {
+      ""id"": ""foreground_grass"",
+      ""type"": ""rectangle"",
+      ""role"": ""accent_plane"",
+      ""x"": 0.0,
+      ""y"": 0.85,
+      ""width"": 1.0,
+      ""height"": 0.15,
+      ""fill"": ""#7CFC00"",
+      ""opacity"": 1.0,
+      ""rotation"": 0.0,
+      ""z_index"": 5
+    },
+    {
+      ""id"": ""field_line"",
+      ""type"": ""line_group"",
+      ""role"": ""texture_group"",
+      ""x"": 0.0,
+      ""y"": 0.87,
+      ""width"": 1.0,
+      ""height"": 0.13,
+      ""line_count"": 12,
+      ""angle"": 0.0,
+      ""spacing"": 0.011,
+      ""stroke"": ""#228B22"",
+      ""stroke_width"": 0.003,
+      ""opacity"": 0.6,
+      ""z_index"": 6
+    },
+    {
+      ""id"": ""distant_hills"",
+      ""type"": ""trapezoid"",
+      ""role"": ""support_plane"",
+      ""x"": 0.85,
+      ""y"": 0.62,
+      ""width"": 0.15,
+      ""height"": 0.06,
+      ""fill"": ""#228B22"",
+      ""opacity"": 0.7,
+      ""rotation"": 0.0,
+      ""top_ratio"": 0.8,
+      ""z_index"": 7
+    },
+    {
+      ""id"": ""sunlight_gradient"",
+      ""type"": ""rectangle"",
+      ""role"": ""accent_plane"",
+      ""x"": 0.35,
+      ""y"": 0.58,
+      ""width"": 0.3,
+      ""height"": 0.25,
+      ""fill"": ""#7CFC00"",
+      ""opacity"": 0.25,
+      ""rotation"": 0.0,
+      ""z_index"": 8
+    },
+    {
+      ""id"": ""dot_cluster_flowers"",
+      ""type"": ""dot_cluster"",
+      ""role"": ""point_group"",
+      ""x"": 0.1,
+      ""y"": 0.88,
+      ""width"": 0.8,
+      ""height"": 0.12,
+      ""count"": 28,
+      ""size_min"": 0.004,
+      ""size_max"": 0.008,
+      ""randomness"": 0.6,
+      ""fill"": ""#FFFF00"",
+      ""opacity"": 0.9,
+      ""z_index"": 9
+    },
+    {
+      ""id"": ""horizon_line"",
+      ""type"": ""line"",
+      ""role"": ""structural_line"",
+ ",,,,,,,ai_generation,智能体分析得到原始图元
