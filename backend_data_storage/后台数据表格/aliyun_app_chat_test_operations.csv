@@ -1,6 +1,6 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
 task-1780620684678-f8a2e4,2026-06-05T00:51:24+00:00,2026-06-05T00:51:24+00:00,,,,,,,,,,page_open,打开阿里云 App Chat 测试页
-task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:52:33+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-4472af1d0dac4017b561a814aef12a74.png,"{
+task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:53:06+00:00,go,https://composition-lab.onrender.com/static/uploads/workflow_inputs/aliyun-app-input-4472af1d0dac4017b561a814aef12a74.png,"{
   ""version"": ""1.0"",
   ""canvas"": {
     ""width"": 1000,
@@ -201,4 +201,4 @@ task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:52:33+00:00,go
       ""y2"": 0.54,
       ""stroke"": ""#228B22"",
       ""stroke_width"": 0.002,
-      ""s",,,,,,,json_canvas_render,保存 JSON 渲染图元画布
+      ""s",https://composition-lab.onrender.com/static/uploads/workflow_inputs/composition-ab-a-c1b9af9011064b30a74fc3b3bc72081c.png,,,,,,save_comparison_image,保存composition图 A
