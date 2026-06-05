@@ -178,7 +178,26 @@ def timestamp_file_prefix(value: str | None = None) -> str:
 
 
 def task_artifact_folder(task_id: str) -> str:
-    return f"上传照片_{safe_github_path_part(task_id)}"
+    return f"upload_{safe_github_path_part(task_id)}"
+
+
+def current_save_timestamp() -> str:
+    return timestamp_file_prefix(utc_now_iso())
+
+
+def json_render_stem(value: Any | None = None) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"JSON_[0-9A-Za-z_.\-]+", text):
+        return text
+    return f"JSON_{current_save_timestamp()}"
+
+
+def analysis_save_stem(kind: str, value: Any | None = None) -> str:
+    text = str(value or "").strip()
+    prefix = "色彩分析" if kind == "color" else "构图分析"
+    if re.fullmatch(rf"{prefix}_[0-9A-Za-z_.\-]+", text):
+        return text
+    return f"{prefix}_{current_save_timestamp()}"
 
 
 def github_contents_url(repo: str, repo_path: str) -> str:
@@ -258,6 +277,47 @@ def comparison_analysis_artifact_path(kind: str) -> str:
     if kind == "color":
         return "任务2_色彩比较/色彩对比分析文本.txt"
     return "任务1_构图比较/构图对比分析文本.txt"
+
+
+def write_completed_ab_analysis_artifacts(
+    *,
+    task_id: str,
+    kind: str,
+    image_a_url: str,
+    image_b_url: str,
+    analysis_text: str,
+    json_save_id: Any | None = None,
+    analysis_save_id: Any | None = None,
+) -> dict[str, Any]:
+    json_stem = json_render_stem(json_save_id)
+    analysis_stem = analysis_save_stem(kind, analysis_save_id)
+    result_ext = ".md"
+    saved: dict[str, Any] = {"json_save_id": json_stem, "analysis_save_id": analysis_stem, "artifacts": []}
+    image_a = read_workflow_public_image(image_a_url)
+    image_b = read_workflow_public_image(image_b_url)
+    if image_a:
+        content, ext = image_a
+        saved["artifacts"].append(write_operation_artifact(
+            task_id,
+            f"{json_stem}/{analysis_stem}_图片A{ext}",
+            content,
+            f"Save {kind} analysis image A {analysis_stem} for {task_id}",
+        ))
+    if image_b:
+        content, ext = image_b
+        saved["artifacts"].append(write_operation_artifact(
+            task_id,
+            f"{json_stem}/{analysis_stem}_图片B{ext}",
+            content,
+            f"Save {kind} analysis image B {analysis_stem} for {task_id}",
+        ))
+    saved["artifacts"].append(write_operation_text_artifact(
+        task_id,
+        f"{json_stem}/{analysis_stem}_分析结果{result_ext}",
+        analysis_text,
+        f"Save {kind} analysis result {analysis_stem} for {task_id}",
+    ))
+    return saved
 
 def read_operation_rows() -> dict[str, dict[str, str]]:
     if not OPERATION_CSV_PATH.exists():
@@ -364,6 +424,25 @@ def is_allowed_ab_image_url(image_url: str) -> bool:
         and parsed.path.startswith("/static/uploads/workflow_inputs/")
         and Path(parsed.path).suffix.lower() in ALLOWED_UPLOAD_EXTENSIONS
     )
+
+
+def workflow_public_url_to_local_path(image_url: str) -> Path | None:
+    if not is_allowed_ab_image_url(image_url):
+        return None
+    filename = Path(urllib.parse.urlparse(image_url).path).name
+    candidate = WORKFLOW_INPUT_DIR / filename
+    try:
+        candidate.relative_to(WORKFLOW_INPUT_DIR)
+    except ValueError:
+        return None
+    return candidate
+
+
+def read_workflow_public_image(image_url: str) -> tuple[bytes, str] | None:
+    local_path = workflow_public_url_to_local_path(image_url)
+    if not local_path or not local_path.exists():
+        return None
+    return local_path.read_bytes(), local_path.suffix.lower() or ".png"
 
 
 
@@ -560,7 +639,7 @@ async def aliyun_app_chat_test_send(
     )
     write_operation_artifact(
         task_key,
-        f"手动上传的图片{ext}",
+        f"upload_{task_key}{ext}",
         content,
         f"Save manual upload for {task_key}",
     )
@@ -588,6 +667,53 @@ async def aliyun_app_chat_test_send(
     if result.upstream_status is None and isinstance(error_message, str) and error_message.startswith("缺少环境变量"):
         status_code = 503
     return JSONResponse(status_code=status_code, content=body)
+
+
+@app.post("/aliyun-app-chat-test/save-rendered-json-canvas")
+async def aliyun_app_chat_test_save_rendered_json_canvas(payload: dict[str, Any]):
+    data_url = str(payload.get("data_url") or "")
+    match = DATA_URL_PATTERN.match(data_url)
+    if not match:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "请提交 png/jpeg/webp 的 data URL"})
+    mime_type = match.group(1).lower().replace("image/jpg", "image/jpeg")
+    try:
+        content = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError):
+        return JSONResponse(status_code=400, content={"ok": False, "message": "图片数据不是有效的 base64"})
+    if not content:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "图片数据为空"})
+    if len(content) > MAX_AB_COMPOSITION_IMAGE_BYTES:
+        return JSONResponse(status_code=413, content={"ok": False, "message": "图片超过 7MB，请缩小画布后再保存"})
+
+    task_key = safe_task_id(payload.get("task_id"))
+    json_stem = json_render_stem(payload.get("json_save_id"))
+    ext = ".jpg" if mime_type == "image/jpeg" else f".{mime_type.rsplit('/', 1)[-1]}"
+    record_aliyun_app_operation(task_key, "json_canvas_render", "保存 JSON 渲染图元画布", ai_raw_image=payload.get("textarea_json"))
+    image_artifact = write_operation_artifact(
+        task_key,
+        f"{json_stem}{ext}",
+        content,
+        f"Save rendered JSON canvas {json_stem} for {task_key}",
+    )
+    textarea_json = str(payload.get("textarea_json") or "").strip()
+    json_artifact = None
+    if textarea_json:
+        json_artifact = write_operation_text_artifact(
+            task_key,
+            f"{json_stem}/{json_stem}.json",
+            textarea_json,
+            f"Save JSON source {json_stem} for {task_key}",
+        )
+    return {
+        "ok": True,
+        "message": "JSON 渲染画布已保存",
+        "task_id": task_key,
+        "json_save_id": json_stem,
+        "artifact_path": image_artifact["repo_path"],
+        "json_artifact_path": json_artifact["repo_path"] if json_artifact else "",
+        "mime_type": mime_type,
+        "size_bytes": len(content),
+    }
 
 
 @app.post("/aliyun-app-chat-test/save-composition-image")
@@ -653,17 +779,30 @@ async def aliyun_app_chat_test_analyze_ab(payload: dict[str, Any]):
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_composition_ab, image_a_url, image_b_url)
     analysis_text = result.analysis if result.ok else result.message
     record_aliyun_app_operation(task_key, "composition_analysis", "构图分析结果", composition_analysis_result=analysis_text)
-    write_operation_text_artifact(
+    legacy_artifact = write_operation_text_artifact(
         task_key,
         comparison_analysis_artifact_path("composition"),
         analysis_text,
         f"Save composition analysis for {task_key}",
+    )
+    completed_artifacts = write_completed_ab_analysis_artifacts(
+        task_id=task_key,
+        kind="composition",
+        image_a_url=image_a_url,
+        image_b_url=image_b_url,
+        analysis_text=analysis_text,
+        json_save_id=payload.get("json_save_id"),
+        analysis_save_id=payload.get("analysis_save_id"),
     )
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
     body = result.as_dict()
     body["task_id"] = task_key
+    body["json_save_id"] = completed_artifacts["json_save_id"]
+    body["analysis_save_id"] = completed_artifacts["analysis_save_id"]
+    body["artifact_path"] = legacy_artifact["repo_path"]
+    body["completed_artifacts"] = [item["repo_path"] for item in completed_artifacts["artifacts"]]
     return JSONResponse(status_code=status_code, content=body)
 
 
@@ -679,17 +818,30 @@ async def aliyun_app_chat_test_analyze_ab_color(payload: dict[str, Any]):
     result = await run_in_threadpool(get_aliyun_app_chat_test_service().analyze_color_ab, image_a_url, image_b_url)
     analysis_text = result.analysis if result.ok else result.message
     record_aliyun_app_operation(task_key, "color_analysis", "色彩分析结果", color_analysis_result=analysis_text)
-    write_operation_text_artifact(
+    legacy_artifact = write_operation_text_artifact(
         task_key,
         comparison_analysis_artifact_path("color"),
         analysis_text,
         f"Save color analysis for {task_key}",
+    )
+    completed_artifacts = write_completed_ab_analysis_artifacts(
+        task_id=task_key,
+        kind="color",
+        image_a_url=image_a_url,
+        image_b_url=image_b_url,
+        analysis_text=analysis_text,
+        json_save_id=payload.get("json_save_id"),
+        analysis_save_id=payload.get("analysis_save_id"),
     )
     status_code = 200 if result.ok else 502
     if result.upstream_status is None and result.upstream_debug.get("error_message") == "缺少环境变量: ALIYUN_API_KEY":
         status_code = 503
     body = result.as_dict()
     body["task_id"] = task_key
+    body["json_save_id"] = completed_artifacts["json_save_id"]
+    body["analysis_save_id"] = completed_artifacts["analysis_save_id"]
+    body["artifact_path"] = legacy_artifact["repo_path"]
+    body["completed_artifacts"] = [item["repo_path"] for item in completed_artifacts["artifacts"]]
     return JSONResponse(status_code=status_code, content=body)
 
 

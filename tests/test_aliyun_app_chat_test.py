@@ -321,13 +321,13 @@ def test_aliyun_app_chat_test_operation_log_records_csv_row():
     assert "生成 JSON" in csv_text
 
 
-def test_operation_artifact_uses_reference_folder_structure(monkeypatch):
+def test_operation_artifact_uses_upload_folder_structure(monkeypatch):
     monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
 
     result = main.write_operation_text_artifact("pytest-folder-001", "任务1_构图比较/构图对比分析文本.txt", "分析文本", "test commit")
 
-    assert "上传照片_pytest-folder-001" in result["local_path"]
-    assert result["repo_path"] == "backend_data_storage/上传照片_pytest-folder-001/任务1_构图比较/构图对比分析文本.txt"
+    assert "upload_pytest-folder-001" in result["local_path"]
+    assert result["repo_path"] == "backend_data_storage/upload_pytest-folder-001/任务1_构图比较/构图对比分析文本.txt"
     assert result["github"]["enabled"] is False
 
 
@@ -356,11 +356,60 @@ def test_github_put_file_uses_contents_api_with_branch_and_base64(monkeypatch):
     monkeypatch.setattr(main.requests, "get", fake_get)
     monkeypatch.setattr(main.requests, "put", fake_put)
 
-    result = main.github_put_file("backend_data_storage/上传照片_t1/当前任务汇总.json", b"{}", "save data")
+    result = main.github_put_file("backend_data_storage/upload_t1/当前任务汇总.json", b"{}", "save data")
 
     assert result["ok"] is True
     assert calls["get"]["params"] == {"ref": "composition-lab-data"}
     assert calls["put"]["json"]["branch"] == "composition-lab-data"
     assert calls["put"]["json"]["content"] == "e30="
     assert calls["put"]["headers"]["Authorization"] == "Bearer token-test"
-    assert "%E4%B8%8A%E4%BC%A0%E7%85%A7%E7%89%87_t1" in calls["put"]["url"]
+    assert "upload_t1" in calls["put"]["url"]
+
+
+def test_save_rendered_json_canvas_creates_json_named_artifacts(monkeypatch):
+    monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
+    data_url = "data:image/png;base64," + __import__("base64").b64encode(_png_bytes()).decode("ascii")
+
+    resp = client.post(
+        "/aliyun-app-chat-test/save-rendered-json-canvas",
+        json={
+            "task_id": "pytest-json-001",
+            "json_save_id": "JSON_2026-06-05T00-00-00Z",
+            "data_url": data_url,
+            "textarea_json": "{\"version\": \"1.0\"}",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["json_save_id"] == "JSON_2026-06-05T00-00-00Z"
+    assert body["artifact_path"] == "backend_data_storage/upload_pytest-json-001/JSON_2026-06-05T00-00-00Z.png"
+    assert body["json_artifact_path"] == "backend_data_storage/upload_pytest-json-001/JSON_2026-06-05T00-00-00Z/JSON_2026-06-05T00-00-00Z.json"
+
+
+def test_completed_ab_analysis_artifacts_use_single_timestamp_folder(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_OPERATION_TOKEN", raising=False)
+    image_a_path = main.WORKFLOW_INPUT_DIR / "pytest-a.png"
+    image_b_path = main.WORKFLOW_INPUT_DIR / "pytest-b.png"
+    image_a_path.write_bytes(_png_bytes())
+    image_b_path.write_bytes(_png_bytes())
+
+    saved = main.write_completed_ab_analysis_artifacts(
+        task_id="pytest-ab-001",
+        kind="composition",
+        image_a_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-a.png",
+        image_b_url="https://composition-lab.onrender.com/static/uploads/workflow_inputs/pytest-b.png",
+        analysis_text="分析结果",
+        json_save_id="JSON_2026-06-05T00-00-00Z",
+        analysis_save_id="构图分析_2026-06-05T00-01-00Z",
+    )
+
+    assert saved["json_save_id"] == "JSON_2026-06-05T00-00-00Z"
+    assert saved["analysis_save_id"] == "构图分析_2026-06-05T00-01-00Z"
+    repo_paths = [artifact["repo_path"] for artifact in saved["artifacts"]]
+    assert repo_paths == [
+        "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_图片A.png",
+        "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_图片B.png",
+        "backend_data_storage/upload_pytest-ab-001/JSON_2026-06-05T00-00-00Z/构图分析_2026-06-05T00-01-00Z_分析结果.md",
+    ]
