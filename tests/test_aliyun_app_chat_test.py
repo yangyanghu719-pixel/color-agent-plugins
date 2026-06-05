@@ -50,6 +50,8 @@ def test_aliyun_app_chat_test_page_has_controls():
     assert "Prompt" not in resp.text
     assert 'type="file"' in resp.text
     assert 'name="image"' in resp.text
+    assert "色彩与构成学习平台" in resp.text
+    assert "每个页面会使用独立任务记录" in resp.text
     assert "生成 JSON" in resp.text
     assert 'id="jsonOutput"' in resp.text
     assert 'id="canvas"' in resp.text
