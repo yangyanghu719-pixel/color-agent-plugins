@@ -1,2 +1,3 @@
 ﻿task_id,created_at,updated_at,prompt,manual_uploaded_image,ai_raw_image,composition_image_a,composition_image_b,composition_analysis_result,color_image_a,color_image_b,color_analysis_result,last_event_type,last_event_label
 task-1780620684678-f8a2e4,2026-06-05T00:51:24+00:00,2026-06-05T00:51:24+00:00,,,,,,,,,,page_open,打开阿里云 App Chat 测试页
+task-1780620699347-ea0658,2026-06-05T00:51:38+00:00,2026-06-05T00:51:40+00:00,,,,,,,,,,button_click,生成 JSON
