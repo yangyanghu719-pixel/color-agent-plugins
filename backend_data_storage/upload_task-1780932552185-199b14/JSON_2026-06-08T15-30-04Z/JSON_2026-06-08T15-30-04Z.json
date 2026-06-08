@@ -106,11 +106,11 @@
       "role": "support_plane",
       "opacity": 1,
       "z_index": 1,
-      "x": 0.15,
-      "y": 0.75,
+      "x": 0.1595238037109375,
+      "y": 0.8139682617187499,
       "width": 0.2,
       "height": 0.15,
-      "fill": "#5A7A9A",
+      "fill": "#4FA84D",
       "rotation": -25
     },
     {
