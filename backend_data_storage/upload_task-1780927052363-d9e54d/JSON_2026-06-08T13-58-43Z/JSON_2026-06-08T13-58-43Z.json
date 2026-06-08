@@ -1,0 +1,370 @@
+{
+  "version": "1.0",
+  "canvas": {
+    "width": 1000,
+    "height": 1000,
+    "background": "#FFFFFF"
+  },
+  "source_summary": {
+    "input_type": "image_upload",
+    "abstract_style": "illustrative_geometric",
+    "visual_center": [
+      0.5,
+      0.48
+    ],
+    "balance": "centered",
+    "density": "medium",
+    "main_subject": "person",
+    "subject_region": [
+      0.22,
+      0.15,
+      0.56,
+      0.75
+    ],
+    "subject_priority": "high"
+  },
+  "elements": [
+    {
+      "id": "head_base",
+      "type": "ellipse",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 1,
+      "x": 0.32,
+      "y": 0.15,
+      "width": 0.36,
+      "height": 0.32,
+      "fill": "#A37B6B",
+      "rotation": 0
+    },
+    {
+      "id": "face",
+      "type": "ellipse",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 2,
+      "x": 0.36,
+      "y": 0.22,
+      "width": 0.28,
+      "height": 0.26,
+      "fill": "#F9ECE3",
+      "rotation": 0
+    },
+    {
+      "id": "hair_top",
+      "type": "trapezoid",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 3,
+      "x": 0.34,
+      "y": 0.15,
+      "width": 0.32,
+      "height": 0.18,
+      "fill": "#8C5A4A",
+      "rotation": 0,
+      "top_ratio": 0.7
+    },
+    {
+      "id": "eye_left",
+      "type": "circle",
+      "role": "point_group",
+      "opacity": 1,
+      "z_index": 4,
+      "x": 0.42,
+      "y": 0.34,
+      "radius": 0.03,
+      "fill": "#333333"
+    },
+    {
+      "id": "eye_right",
+      "type": "circle",
+      "role": "point_group",
+      "opacity": 1,
+      "z_index": 4,
+      "x": 0.52,
+      "y": 0.34,
+      "radius": 0.03,
+      "fill": "#333333"
+    },
+    {
+      "id": "tear_left",
+      "type": "hollow_dot",
+      "role": "accent_plane",
+      "opacity": 0.9,
+      "z_index": 5,
+      "x": 0.41,
+      "y": 0.38,
+      "radius": 0.025,
+      "stroke": "#D1D1D1",
+      "stroke_width": 0.008
+    },
+    {
+      "id": "tear_right",
+      "type": "hollow_dot",
+      "role": "accent_plane",
+      "opacity": 0.9,
+      "z_index": 5,
+      "x": 0.53,
+      "y": 0.38,
+      "radius": 0.025,
+      "stroke": "#D1D1D1",
+      "stroke_width": 0.008
+    },
+    {
+      "id": "mouth",
+      "type": "curve_line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 6,
+      "points": [
+        [
+          0.44,
+          0.46
+        ],
+        [
+          0.48,
+          0.5
+        ],
+        [
+          0.52,
+          0.5
+        ],
+        [
+          0.56,
+          0.46
+        ]
+      ],
+      "stroke": "#8C5A4A",
+      "stroke_width": 0.012,
+      "style": "solid"
+    },
+    {
+      "id": "shirt",
+      "type": "rectangle",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 7,
+      "x": 0.22,
+      "y": 0.52,
+      "width": 0.56,
+      "height": 0.42,
+      "fill": "#6FA3D6",
+      "rotation": 0
+    },
+    {
+      "id": "tie",
+      "type": "trapezoid",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 8,
+      "x": 0.44,
+      "y": 0.58,
+      "width": 0.12,
+      "height": 0.3,
+      "fill": "#8C5A4A",
+      "rotation": 0,
+      "top_ratio": 0.4
+    },
+    {
+      "id": "collar_left",
+      "type": "triangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 9,
+      "x": 0.32,
+      "y": 0.52,
+      "width": 0.1,
+      "height": 0.08,
+      "fill": "#6FA3D6",
+      "rotation": 0,
+      "triangle_kind": "equilateral"
+    },
+    {
+      "id": "collar_right",
+      "type": "triangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 9,
+      "x": 0.58,
+      "y": 0.52,
+      "width": 0.1,
+      "height": 0.08,
+      "fill": "#6FA3D6",
+      "rotation": 0,
+      "triangle_kind": "equilateral"
+    },
+    {
+      "id": "cheek_left",
+      "type": "circle",
+      "role": "accent_plane",
+      "opacity": 0.8,
+      "z_index": 10,
+      "x": 0.38,
+      "y": 0.4,
+      "radius": 0.025,
+      "fill": "#E8C9C2"
+    },
+    {
+      "id": "cheek_right",
+      "type": "circle",
+      "role": "accent_plane",
+      "opacity": 0.8,
+      "z_index": 10,
+      "x": 0.56,
+      "y": 0.4,
+      "radius": 0.025,
+      "fill": "#E8C9C2"
+    },
+    {
+      "id": "shadow_under_chin",
+      "type": "ellipse",
+      "role": "support_plane",
+      "opacity": 0.6,
+      "z_index": 11,
+      "x": 0.38,
+      "y": 0.48,
+      "width": 0.24,
+      "height": 0.06,
+      "fill": "#D1D1D1",
+      "rotation": 0
+    },
+    {
+      "id": "desk_line_1",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 12,
+      "x1": 0.05,
+      "y1": 0.88,
+      "x2": 0.25,
+      "y2": 0.88,
+      "stroke": "#333333",
+      "stroke_width": 0.015,
+      "style": "solid"
+    },
+    {
+      "id": "desk_line_2",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 12,
+      "x1": 0.3,
+      "y1": 0.88,
+      "x2": 0.5,
+      "y2": 0.88,
+      "stroke": "#333333",
+      "stroke_width": 0.015,
+      "style": "solid"
+    },
+    {
+      "id": "desk_line_3",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 12,
+      "x1": 0.55,
+      "y1": 0.88,
+      "x2": 0.75,
+      "y2": 0.88,
+      "stroke": "#333333",
+      "stroke_width": 0.015,
+      "style": "solid"
+    },
+    {
+      "id": "desk_line_4",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 12,
+      "x1": 0.8,
+      "y1": 0.88,
+      "x2": 0.95,
+      "y2": 0.88,
+      "stroke": "#333333",
+      "stroke_width": 0.015,
+      "style": "solid"
+    },
+    {
+      "id": "brow_left",
+      "type": "curve_line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 13,
+      "points": [
+        [
+          0.38,
+          0.3
+        ],
+        [
+          0.4,
+          0.32
+        ],
+        [
+          0.44,
+          0.32
+        ],
+        [
+          0.46,
+          0.3
+        ]
+      ],
+      "stroke": "#333333",
+      "stroke_width": 0.008,
+      "style": "solid"
+    },
+    {
+      "id": "brow_right",
+      "type": "curve_line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 13,
+      "points": [
+        [
+          0.5,
+          0.3
+        ],
+        [
+          0.52,
+          0.32
+        ],
+        [
+          0.56,
+          0.32
+        ],
+        [
+          0.58,
+          0.3
+        ]
+      ],
+      "stroke": "#333333",
+      "stroke_width": 0.008,
+      "style": "solid"
+    },
+    {
+      "id": "ear_left",
+      "type": "ellipse",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 14,
+      "x": 0.28,
+      "y": 0.36,
+      "width": 0.06,
+      "height": 0.1,
+      "fill": "#F9ECE3",
+      "rotation": -0.1
+    },
+    {
+      "id": "ear_right",
+      "type": "ellipse",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 14,
+      "x": 0.66,
+      "y": 0.36,
+      "width": 0.06,
+      "height": 0.1,
+      "fill": "#F9ECE3",
+      "rotation": 0.1
+    }
+  ]
+}
