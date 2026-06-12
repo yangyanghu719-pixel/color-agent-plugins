@@ -1,0 +1,359 @@
+{
+  "version": "1.0",
+  "canvas": {
+    "width": 1000,
+    "height": 667,
+    "background": "#FFFFFF"
+  },
+  "source_summary": {
+    "input_type": "image_upload",
+    "abstract_style": "illustrative_geometric",
+    "visual_center": [
+      0.52,
+      0.58
+    ],
+    "balance": "centered",
+    "density": "medium",
+    "main_subject": "person_in_simulator",
+    "subject_region": [
+      0.38,
+      0.44,
+      0.36,
+      0.52
+    ],
+    "subject_priority": "high"
+  },
+  "elements": [
+    {
+      "id": "bg_wall",
+      "type": "rectangle",
+      "role": "background_support",
+      "opacity": 1,
+      "z_index": 0,
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 0.42,
+      "fill": "#E8E8E8",
+      "rotation": 0
+    },
+    {
+      "id": "cabinets",
+      "type": "rectangle",
+      "role": "background_support",
+      "opacity": 1,
+      "z_index": 1,
+      "x": 0,
+      "y": 0.12,
+      "width": 0.78,
+      "height": 0.3,
+      "fill": "#A0A0A0",
+      "rotation": 0
+    },
+    {
+      "id": "monitor_array",
+      "type": "rectangle",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 2,
+      "x": 0.19,
+      "y": 0.36,
+      "width": 0.62,
+      "height": 0.18,
+      "fill": "#1A1A1A",
+      "rotation": 0
+    },
+    {
+      "id": "screen_content",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 3,
+      "x": 0.2,
+      "y": 0.37,
+      "width": 0.6,
+      "height": 0.16,
+      "fill": "#F5F5F5",
+      "rotation": 0
+    },
+    {
+      "id": "simulator_seat",
+      "type": "rectangle",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 4,
+      "x": 0.42,
+      "y": 0.58,
+      "width": 0.28,
+      "height": 0.36,
+      "fill": "#D9C59A",
+      "rotation": 0
+    },
+    {
+      "id": "person_back",
+      "type": "rectangle",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 5,
+      "x": 0.46,
+      "y": 0.44,
+      "width": 0.2,
+      "height": 0.24,
+      "fill": "#2C2C2C",
+      "rotation": 0
+    },
+    {
+      "id": "steering_wheel",
+      "type": "circle",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 6,
+      "x": 0.5,
+      "y": 0.62,
+      "radius": 0.06,
+      "fill": "#1A1A1A"
+    },
+    {
+      "id": "chair_left",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 7,
+      "x": 0,
+      "y": 0.6,
+      "width": 0.15,
+      "height": 0.25,
+      "fill": "#1A1A1A",
+      "rotation": 0
+    },
+    {
+      "id": "chair_right",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 8,
+      "x": 0.16,
+      "y": 0.6,
+      "width": 0.15,
+      "height": 0.25,
+      "fill": "#1A1A1A",
+      "rotation": 0
+    },
+    {
+      "id": "ceiling_lights",
+      "type": "line_group",
+      "role": "texture_group",
+      "opacity": 0.9,
+      "z_index": 9,
+      "x": 0,
+      "y": 0.02,
+      "width": 0.85,
+      "height": 0.04,
+      "line_count": 4,
+      "angle": 0,
+      "spacing": 0.03,
+      "stroke": "#FFFFFF",
+      "stroke_width": 0.004
+    },
+    {
+      "id": "window_strip",
+      "type": "rectangle",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 10,
+      "x": 0.54,
+      "y": 0.04,
+      "width": 0.22,
+      "height": 0.08,
+      "fill": "#666666",
+      "rotation": 0
+    },
+    {
+      "id": "mounting_bracket",
+      "type": "trapezoid",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 11,
+      "x": 0.67,
+      "y": 0.28,
+      "width": 0.06,
+      "height": 0.08,
+      "fill": "#2C2C2C",
+      "rotation": 0,
+      "top_ratio": 0.4
+    },
+    {
+      "id": "camera_mount",
+      "type": "rectangle",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 12,
+      "x": 0.69,
+      "y": 0.29,
+      "width": 0.03,
+      "height": 0.05,
+      "fill": "#1A1A1A",
+      "rotation": 0
+    },
+    {
+      "id": "poster_stack",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 0.95,
+      "z_index": 13,
+      "x": 0.72,
+      "y": 0.5,
+      "width": 0.25,
+      "height": 0.4,
+      "fill": "#F5F5F5",
+      "rotation": 0.05
+    },
+    {
+      "id": "floor_grid",
+      "type": "grid_pattern",
+      "role": "texture_group",
+      "opacity": 0.6,
+      "z_index": 14,
+      "x": 0,
+      "y": 0.75,
+      "width": 1,
+      "height": 0.25,
+      "rows": 6,
+      "cols": 12,
+      "stroke": "#CCCCCC",
+      "stroke_width": 0.003
+    },
+    {
+      "id": "dashboard_panel",
+      "type": "rectangle",
+      "role": "dominant_plane",
+      "opacity": 1,
+      "z_index": 15,
+      "x": 0.35,
+      "y": 0.52,
+      "width": 0.3,
+      "height": 0.12,
+      "fill": "#2C2C2C",
+      "rotation": 0
+    },
+    {
+      "id": "speedometer",
+      "type": "circle",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 16,
+      "x": 0.78,
+      "y": 0.46,
+      "radius": 0.03,
+      "fill": "#F5F5F5"
+    },
+    {
+      "id": "screen_divider",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 17,
+      "x1": 0.41,
+      "y1": 0.37,
+      "x2": 0.41,
+      "y2": 0.54,
+      "stroke": "#666666",
+      "stroke_width": 0.002,
+      "style": "solid"
+    },
+    {
+      "id": "screen_divider_2",
+      "type": "line",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 18,
+      "x1": 0.62,
+      "y1": 0.37,
+      "x2": 0.62,
+      "y2": 0.54,
+      "stroke": "#666666",
+      "stroke_width": 0.002,
+      "style": "solid"
+    },
+    {
+      "id": "footrest",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 19,
+      "x": 0.34,
+      "y": 0.88,
+      "width": 0.32,
+      "height": 0.08,
+      "fill": "#E8E8E8",
+      "rotation": 0
+    },
+    {
+      "id": "armrest_left",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 20,
+      "x": 0.44,
+      "y": 0.68,
+      "width": 0.06,
+      "height": 0.12,
+      "fill": "#D9C59A",
+      "rotation": -0.1
+    },
+    {
+      "id": "armrest_right",
+      "type": "rectangle",
+      "role": "support_plane",
+      "opacity": 1,
+      "z_index": 21,
+      "x": 0.66,
+      "y": 0.68,
+      "width": 0.06,
+      "height": 0.12,
+      "fill": "#D9C59A",
+      "rotation": 0.1
+    },
+    {
+      "id": "shoe",
+      "type": "rectangle",
+      "role": "accent_plane",
+      "opacity": 1,
+      "z_index": 22,
+      "x": 0.4,
+      "y": 0.86,
+      "width": 0.07,
+      "height": 0.05,
+      "fill": "#CCCCCC",
+      "rotation": 0
+    },
+    {
+      "id": "cable_bundle",
+      "type": "polyline",
+      "role": "structural_line",
+      "opacity": 1,
+      "z_index": 23,
+      "points": [
+        [
+          0.7,
+          0.32
+        ],
+        [
+          0.72,
+          0.35
+        ],
+        [
+          0.74,
+          0.33
+        ],
+        [
+          0.76,
+          0.36
+        ]
+      ],
+      "stroke": "#2C2C2C",
+      "stroke_width": 0.003,
+      "style": "solid"
+    }
+  ]
+}
